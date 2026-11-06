@@ -1,0 +1,47 @@
+---
+title: Oh My Pi CLI (experimental)
+description: Run the Oh My Pi (omp) coding agent through Happier over its native RPC mode, with resume, steering, approvals, and thinking levels.
+---
+
+Oh My Pi is a separate project from [Pi](/agents/pi), with its own `omp` binary
+and its own settings and credentials directory. Happier treats it as its own
+agent and launches your locally installed `omp` in its native RPC mode
+(`omp --mode rpc-ui`), not through ACP. Happier never reuses Pi's agent
+directory or sign-in for it.
+
+This agent is experimental and ships in the next Happier version.
+
+## What you need first
+
+Install Oh My Pi with the instructions in the
+[official repository](https://github.com/can1357/oh-my-pi) (it runs on Bun, so
+`omp` normally lives in `~/.bun/bin`), and sign in to a model provider by running
+`omp` once on the machine where Happier runs. Happier does not install or update
+`omp` for you.
+
+## Start and resume sessions
+
+```bash
+happier omp
+```
+
+Happier supports fresh and resumed sessions, steering a running turn, model
+selection, and thinking levels (`off` through `xhigh`, plus Oh My Pi's `max`).
+
+Happier permission modes map onto Oh My Pi's `--approval-mode`:
+
+- **Default** asks before each tool call that needs approval.
+- **Safe YOLO** approves file writes and asks for the rest.
+- **YOLO** approves everything.
+
+Oh My Pi's approval prompts appear in Happier as ordinary tool approvals.
+
+## Limits
+
+- Happier does not give Oh My Pi its own Happier tools or connected-service credentials yet.
+- Very large single frames from `omp` are a known limitation of the current RPC protocol version.
+
+## Related
+
+- [Pi](/agents/pi)
+- [Agent capabilities](/agents/capabilities)

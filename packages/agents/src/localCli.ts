@@ -200,6 +200,16 @@ export const AGENT_LOCAL_CLI_CONFIG: Readonly<Record<AgentId, AgentLocalCliConfi
       initialInput: '/login\r',
     }],
   }),
+  omp: createAgentLocalCliConfig('omp', {
+    machineLoginKey: 'omp',
+    authSupport: 'unsupported',
+    authLaunches: [],
+  }),
+  hermes: createAgentLocalCliConfig('hermes', {
+    machineLoginKey: 'hermes',
+    authSupport: 'unsupported',
+    authLaunches: [],
+  }),
 });
 
 export function getAgentLocalCliConfig(agentId: AgentId): AgentLocalCliConfig {

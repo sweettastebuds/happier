@@ -98,6 +98,8 @@ describe('cli.codex capability (ACP)', () => {
               devin: makeUnavailableCliEntry(),
               customAcp: makeUnavailableCliEntry(),
               pi: makeUnavailableCliEntry(),
+              omp: makeUnavailableCliEntry(),
+              hermes: makeUnavailableCliEntry(),
               copilot: makeUnavailableCliEntry(),
               cursor: makeUnavailableCliEntry(),
               agy: makeUnavailableCliEntry(),

@@ -213,6 +213,20 @@ export const AGENT_AUTH_PROBE_CONFIG: Readonly<Record<AgentId, AgentAuthProbeCon
     backgroundChecks: 'manual_only',
     envVars: ['CODEBUDDY_API_KEY'],
   },
+  omp: {
+    agentId: 'omp',
+    binaryNames: [getProviderCliRuntimeSpec('omp').binaryName],
+    statusCommand: null,
+    parser: 'unknown',
+    backgroundChecks: 'manual_only',
+  },
+  hermes: {
+    agentId: 'hermes',
+    binaryNames: [getProviderCliRuntimeSpec('hermes').binaryName],
+    statusCommand: null,
+    parser: 'unknown',
+    backgroundChecks: 'manual_only',
+  },
 });
 
 export function getAgentAuthProbeConfig(

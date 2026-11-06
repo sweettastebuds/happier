@@ -413,6 +413,14 @@ export const UPCOMING_AGENTS: ReadonlyArray<UpcomingAgent> = [
     },
     {
         availability: 'upcoming',
+        id: 'hermes',
+        name: 'Hermes Agent',
+        vendor: 'Nous Research',
+        binary: 'hermes',
+        note: 'Hermes Agent arrives in the next version as an experimental agent. Happier connects to a Hermes gateway you already run on your own computer; it does not start or stop one. Nothing on this site runs Hermes yet.',
+    },
+    {
+        availability: 'upcoming',
         id: 'coderabbit',
         name: 'CodeRabbit',
         vendor: 'CodeRabbit',

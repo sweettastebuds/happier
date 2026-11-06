@@ -521,6 +521,10 @@ Instead:
 - keep static ACP differences on the built-in ACP definition: model config-option application, permission-intent-to-agent-mode mapping, and whether Happier MCP descriptors are passed through the standard ACP request. A `null` permission mapping is an intentional no-op, not a fallback mode. When an agent ignores the standard ACP MCP field but has a native MCP config model, keep that wire fact as `drop` and use one provider-owned, process-scoped config adapter rather than disabling Happier tools or mutating the user's files.
 - For catalog ACP agents with permission-mode mappings, the backend owns applying that mapping on start, load, replay-load, and explicit mode-override clear. The runtime applies an explicit session-mode override after the initial mapping; permission-triggered restarts preserve that precedence. Clearing uses the latest permission intent through the same mapping function, with failures handled by the existing override synchronizer. A null mapping retains provider policy. The UI reuses negotiated mode metadata to describe the reported native policy separately from selected permission intent and pending overrides.
 
+Native non-ACP agents use a provider-owned backend and have no `BUILT_IN_ACP_CONFIG` entry:
+- `omp` (Oh My Pi) is its own agent id, not a `pi` flavor alias. It launches `omp --mode rpc-ui` through the Pi RPC backend parameterized in place (binary, argv, spawn env, command names), so there is a single RPC owner. It declares no connected services and no bridge tools. Its install is user-owned (Bun), so `managedInstall` is `null`.
+- `hermes` (Hermes Agent) connects over the `hermes-gateway-v1` WebSocket to a gateway the user already runs. Happier never starts or stops it. Its install is user-owned (Python), so `managedInstall` is `null`.
+
 Configured user-defined ACP backends/presets do not become `AgentId`s.
 They live in:
 - `packages/protocol/src/acpCatalog/*`

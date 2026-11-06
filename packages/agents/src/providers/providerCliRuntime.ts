@@ -559,6 +559,40 @@ export const PROVIDER_CLI_RUNTIME_SPECS: Readonly<Record<AgentId, ProviderCliRun
     installGuideUrl: 'https://www.codebuddy.ai/docs/cli/quickstart',
     docsUrl: 'https://www.codebuddy.ai/docs/cli/acp',
   },
+  omp: {
+    id: 'omp',
+    title: 'Oh My Pi CLI',
+    binaryName: 'omp',
+    knownCommandCandidates: [
+      { kind: 'homeBinDir', relativeDir: '.bun/bin' },
+    ],
+    sourcePreferenceDefault: 'system-first',
+    // The npm package's bin is a Bun-executed TypeScript entry (src/cli.ts), so a Happier-managed npm install would
+    // not be runnable without Bun on PATH. The user installs omp with Bun themselves.
+    managedInstall: null,
+    manualInstallKind: 'none',
+    manualInstallRecipes: null,
+    acceptsJavaScriptFileOverride: false,
+    installGuideUrl: 'https://github.com/can1357/oh-my-pi',
+    docsUrl: 'https://omp.sh',
+  },
+  hermes: {
+    id: 'hermes',
+    title: 'Hermes Agent CLI',
+    binaryName: 'hermes',
+    knownCommandCandidates: [
+      { kind: 'homeBinDir', relativeDir: '.local/bin' },
+      { kind: 'homeBinDir', relativeDir: 'AppData/Local/hermes/bin' },
+    ],
+    sourcePreferenceDefault: 'system-first',
+    // Hermes is a Python install owned by the user (and their gateway); Happier never installs or updates it.
+    managedInstall: null,
+    manualInstallKind: 'none',
+    manualInstallRecipes: null,
+    acceptsJavaScriptFileOverride: false,
+    installGuideUrl: 'https://github.com/NousResearch/hermes-agent',
+    docsUrl: null,
+  },
 } as const;
 
 export function getProviderCliRuntimeSpec(id: AgentId): ProviderCliRuntimeSpec {

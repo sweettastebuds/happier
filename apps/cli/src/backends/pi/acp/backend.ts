@@ -6,11 +6,14 @@ import {
   resolvePiBrokerExtensionArgs,
 } from '@/backends/pi/brokerExtension';
 import { PiRpcBackend } from '@/backends/pi/rpc/PiRpcBackend';
+import type { PiRpcFlavorId } from '@/backends/pi/rpc/piRpcFlavor';
 import { readConnectedServiceChildSelectionsFromEnv } from '@/daemon/connectedServices/connectedServiceChildEnvironment';
 import { requireProviderCliLaunchSpec } from '@/runtime/managedTools/requireProviderCliLaunchSpec';
 import { parsePermissionIntentAlias, providers } from '@happier-dev/agents';
 
 export interface PiBackendOptions extends AgentFactoryOptions {
+  /** Pi-family agent to launch; defaults to `pi`. `omp` reuses this backend with its own argv/env/dialect. */
+  flavor?: PiRpcFlavorId;
   mcpServers?: Record<string, McpServerConfig>;
   permissionMode?: PermissionMode;
   happierSessionId?: string | null;
@@ -53,6 +56,31 @@ export function buildPiToolsForPermissionMode(permissionMode?: string): string[]
   // types used by normal callers. Pi has no mid-session permission interception;
   // fail closed rather than granting its shell and write tools.
   return ['read', 'grep', 'find', 'ls'];
+}
+
+export type OmpApprovalMode = 'always-ask' | 'write' | 'yolo';
+
+/**
+ * omp enforces permissions at runtime with `--approval-mode`, so the launch-time `--tools` allowlist
+ * pi needs is not used. `always-ask` auto-approves read-tier tools and asks for write/exec ones, which
+ * is the closest available fit for plan/read-only (the user can still approve a write); omp has no
+ * stricter mode. Unrecognized values fail closed to `always-ask`.
+ */
+export function buildOmpApprovalModeForPermissionMode(permissionMode?: string): OmpApprovalMode {
+  const mode = parsePermissionIntentAlias(typeof permissionMode === 'string' ? permissionMode : 'default');
+  if (mode === 'yolo') return 'yolo';
+  if (mode === 'safe-yolo') return 'write';
+  return 'always-ask';
+}
+
+export function buildOmpRpcArgs(opts?: Readonly<{
+  permissionMode?: PermissionMode;
+  thinkingLevel?: string | null;
+}>): string[] {
+  const args = ['--mode', 'rpc-ui', '--approval-mode', buildOmpApprovalModeForPermissionMode(opts?.permissionMode)];
+  const thinking = providers.omp.normalizeOmpThinkingLevel(opts?.thinkingLevel);
+  if (thinking) args.push('--thinking', thinking);
+  return args;
 }
 
 export function buildPiRpcArgs(opts?: Readonly<{
@@ -118,11 +146,41 @@ export function resolveHappyBridgeExtensionArgs(opts?: Readonly<{
   return bridge ? ['--extension', bridge.extensionPath] : [];
 }
 
+function createOmpRpcBackend(
+  options: PiBackendOptions,
+  env: Record<string, string>,
+  processEnv: NodeJS.ProcessEnv,
+): AgentBackend {
+  const launch = requireProviderCliLaunchSpec('omp', { processEnv });
+  return new PiRpcBackend({
+    flavor: 'omp',
+    cwd: options.cwd,
+    command: launch.command,
+    args: [
+      ...launch.args,
+      ...buildOmpRpcArgs({
+        permissionMode: options.permissionMode,
+        thinkingLevel: providers.omp.resolveOmpThinkingLevelFromEnv(env),
+      }),
+    ],
+    happierSessionId: options.happierSessionId ?? null,
+    appendSystemPromptText: options.appendSystemPromptText ?? null,
+    permissionHandler: options.permissionHandler,
+    env: {
+      ...env,
+      NODE_ENV: 'production',
+      DEBUG: '',
+      CI: '1',
+    },
+  });
+}
+
 export function createPiBackend(options: PiBackendOptions): AgentBackend {
   const env = Object.fromEntries(
     Object.entries(options.env ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
   );
   const processEnv = { ...process.env, ...env };
+  if (options.flavor === 'omp') return createOmpRpcBackend(options, env, processEnv);
   const thinkingLevel = providers.pi.resolvePiThinkingLevelFromEnv(env);
   const launchSelection = resolvePiLaunchSelectionFromConnectedServiceSelection(env);
   const launch = requireProviderCliLaunchSpec('pi', { processEnv });

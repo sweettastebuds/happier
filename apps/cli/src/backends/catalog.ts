@@ -14,8 +14,10 @@ import { agent as cursor } from '@/backends/cursor';
 import { agent as devin } from '@/backends/devin';
 import { agent as gemini } from '@/backends/gemini';
 import { agent as grok } from '@/backends/grok';
+import { agent as hermes } from '@/backends/hermes';
 import { agent as kimi } from '@/backends/kimi';
 import { agent as kilo } from '@/backends/kilo';
+import { agent as omp } from '@/backends/omp';
 import { agent as opencode } from '@/backends/opencode';
 import { agent as pi } from '@/backends/pi';
 import { agent as qwen } from '@/backends/qwen';
@@ -71,6 +73,8 @@ export const AGENTS: Partial<Record<CatalogAgentId, AgentCatalogEntry>> = {
   grok,
   ...BUILT_IN_CATALOG_DEFINED_ACP_AGENTS,
   pi,
+  omp,
+  hermes,
   copilot,
   cursor,
   devin,

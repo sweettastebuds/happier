@@ -62,6 +62,7 @@ import {
   type PiContextTelemetry,
 } from './piContextTelemetryMarker';
 import { mapPiRpcEventToAgentMessages } from './eventMapping';
+import { PI_RPC_FLAVORS, removeScrubbedEnvKeys, type PiRpcFlavor, type PiRpcFlavorId } from './piRpcFlavor';
 import {
   createPiProviderFailureError,
   normalizePiProviderFailure,
@@ -78,7 +79,9 @@ import type {
 import {
   buildPiExtensionAskUserQuestionInput,
   buildPiExtensionUiResponse,
+  buildPiToolApprovalResponse,
   parsePiBlockingExtensionUiRequest,
+  parsePiToolApprovalSelect,
   parsePiExtensionUserInput,
   type PiExtensionUiResponse,
 } from './piExtensionUiRequest';
@@ -649,6 +652,8 @@ async function stopPiRpcProcess(child: ChildProcessWithoutNullStreams): Promise<
 }
 
 export type PiRpcSpawnOptions = {
+  /** Which pi-family agent this process is. Defaults to `pi`. */
+  flavor?: PiRpcFlavorId;
   cwd: string;
   command: string;
   args: string[];
@@ -677,6 +682,7 @@ export class PiRpcBackend implements AgentBackend {
     toolsBridgeConfigText: string | null;
   }>;
 
+  private readonly flavor: PiRpcFlavor;
   private process: ChildProcessWithoutNullStreams | null = null;
   private appendSystemPromptArtifact: ProtectedTempTextArtifact | null = null;
   private toolsBridgeConfigArtifact: ProtectedTempTextArtifact | null = null;
@@ -709,6 +715,8 @@ export class PiRpcBackend implements AgentBackend {
   private sessionModelsRefresh: Deferred<boolean> | null = null;
   private pendingModelObservation: { models: unknown[]; observedAt: number } | null = null;
   private modelRuntimeStateReady = false;
+  /** `modelCatalog: 'rpc'` flavors read the catalog once per spawned process. */
+  private rpcModelCatalogRequested = false;
   private currentThinkingLevel = 'medium';
   private sessionModelsObservedAt: number | null = null;
   private lastPublishedUsageKey: string | null = null;
@@ -735,11 +743,12 @@ export class PiRpcBackend implements AgentBackend {
 
   constructor(options: PiRpcSpawnOptions) {
     this.permissionHandler = options.permissionHandler ?? null;
+    this.flavor = PI_RPC_FLAVORS[options.flavor ?? 'pi'];
     this.options = {
       cwd: options.cwd,
       command: options.command,
       args: [...options.args],
-      env: { ...(options.env ?? {}) },
+      env: removeScrubbedEnvKeys(this.flavor, { ...(options.env ?? {}) }),
       happierSessionId: asNonEmptyString(options.happierSessionId) ?? null,
       appendSystemPromptText:
         typeof options.appendSystemPromptText === 'string' && options.appendSystemPromptText.trim().length > 0
@@ -1550,9 +1559,11 @@ export class PiRpcBackend implements AgentBackend {
   }
 
   private async resolveProtectedSpawnArtifactArgs(): Promise<string[]> {
-    this.modelDiscoveryArtifact ??= await materializePiModelDiscoveryExtension({ background: true });
+    if (this.flavor.modelCatalog === 'extension') {
+      this.modelDiscoveryArtifact ??= await materializePiModelDiscoveryExtension({ background: true });
+    }
     return [
-      '--extension', this.modelDiscoveryArtifact.path,
+      ...(this.modelDiscoveryArtifact ? ['--extension', this.modelDiscoveryArtifact.path] : []),
       ...(await this.resolveToolsBridgeConfigArgs()),
       ...(await this.resolveAppendSystemPromptArgs()),
     ];
@@ -1584,10 +1595,10 @@ export class PiRpcBackend implements AgentBackend {
     this.refreshPiBrokerLoadNonceForNextSpawn();
     const child = spawn(this.options.command, params.args, {
       cwd: this.options.cwd,
-      env: {
+      env: removeScrubbedEnvKeys(this.flavor, {
         ...process.env,
         ...this.options.env,
-      },
+      }),
       stdio: 'pipe',
       windowsHide: true,
     });
@@ -1597,10 +1608,16 @@ export class PiRpcBackend implements AgentBackend {
     }
 
     const spawnedChild = child as ChildProcessWithoutNullStreams;
+    // Written before any other command can be queued, so every (re)spawn is opted in. The response
+    // carries no pending request and is ignored.
+    if (this.flavor.askDialogOptIn) {
+      spawnedChild.stdin.write(`${JSON.stringify({ id: 'happier-set-ask-dialog', type: 'set_ask_dialog', enabled: true })}\n`);
+    }
     this.settleModelDiscovery(false);
     this.sessionModelsRefresh = createDeferred<boolean>();
     this.pendingModelObservation = null;
     this.modelRuntimeStateReady = false;
+    this.rpcModelCatalogRequested = false;
     this.process = spawnedChild;
     const stdoutLineReader = attachPiRpcJsonlLineReader(child.stdout, (line) => {
       if (this.process === spawnedChild) this.handleStdoutLine(line);
@@ -1853,7 +1870,7 @@ export class PiRpcBackend implements AgentBackend {
     await this.stopRpcProcessForRestart();
     await this.spawnRpcProcessWithProtectedArtifacts({
       argsBeforeProtected: this.options.args,
-      argsAfterProtected: ['--session', params.sessionArg],
+      argsAfterProtected: [this.flavor.resumeFlag, params.sessionArg],
     }, params.lifecycle);
 
     try {
@@ -2293,6 +2310,21 @@ export class PiRpcBackend implements AgentBackend {
       : null;
     timeout?.unref?.();
     try {
+      const toolApproval = this.flavor.toolApprovalViaSelect && this.pendingTurn
+        ? parsePiToolApprovalSelect(request)
+        : null;
+      if (toolApproval) {
+        const result = this.permissionHandler
+          ? await this.permissionHandler.handleToolCall(
+            toolApproval.id,
+            toolApproval.toolName,
+            { prompt: toolApproval.prompt },
+          )
+          : { decision: 'denied' as const };
+        if (providerTimedOut) return;
+        await this.writeExtensionUiResponse(child, buildPiToolApprovalResponse(toolApproval, result));
+        return;
+      }
       const result = this.permissionHandler
         ? await this.permissionHandler.handleToolCall(
           request.id,
@@ -3277,7 +3309,7 @@ export class PiRpcBackend implements AgentBackend {
   }
 
   private async getCommands(options: PiRpcCommandOptions = {}, timeoutMs = 30_000): Promise<PiRpcCommandsData> {
-    const response = await this.sendCommand({ type: 'get_commands' }, timeoutMs, options);
+    const response = await this.sendCommand({ type: this.flavor.commandsRpc }, timeoutMs, options);
     return (asRecord(response.data) ?? {}) as PiRpcCommandsData;
   }
 
@@ -3320,6 +3352,25 @@ export class PiRpcBackend implements AgentBackend {
       payload: { ...this.sessionModelState, observedAt: this.sessionModelsObservedAt },
     });
     this.settleModelDiscovery(true);
+  }
+
+  private requestRpcModelCatalog(isCurrent: () => boolean): void {
+    if (this.flavor.modelCatalog !== 'rpc' || this.rpcModelCatalogRequested) return;
+    this.rpcModelCatalogRequested = true;
+    void this.sendCommand({ type: 'get_available_models' }, 30_000, { processAlreadyEnsured: true }).then((response) => {
+      if (!isCurrent()) return;
+      const models = asRecord(response.data)?.models;
+      if (!Array.isArray(models) || models.length === 0) {
+        logger.infoFile(`[${this.flavor.agentId}] get_available_models returned no models; retaining the last available model list`);
+        this.settleModelDiscovery(false);
+        return;
+      }
+      this.pendingModelObservation = { models, observedAt: Date.now() };
+      this.publishPendingModelObservation();
+    }).catch((error: unknown) => {
+      logger.infoFile(`[${this.flavor.agentId}] get_available_models failed: ${asError(error).message}`);
+      this.settleModelDiscovery(false);
+    });
   }
 
   private publishRuntimeState(state: PiRpcStateData): void {
@@ -3373,6 +3424,7 @@ export class PiRpcBackend implements AgentBackend {
 
     this.modelRuntimeStateReady = true;
     this.publishPendingModelObservation();
+    this.requestRpcModelCatalog(isCurrentPublication);
 
     this.availableCommandsKnownForCurrentPublication = false;
     const availableCommandsRefresh = this.getCommands({ processAlreadyEnsured: true }).then((commands) => {

@@ -598,6 +598,9 @@ export type Metadata = {
   devinSessionId?: string, // Devin ACP session ID (opaque)
   piSessionId?: string, // Pi RPC session ID (opaque)
   piSessionFile?: string, // Absolute Pi session file path (preferred resume primitive)
+  hermesSessionId?: string, // Hermes gateway session ID (stable logical id, opaque)
+  hermesProfileId?: string, // Hermes gateway owner profile identity (the profile home); resume must attach to the same one
+  hermesProfileName?: string, // Hermes `-p` profile name, when Hermes reports a usable one
   sessionUsageLimitRecoveryV1?: SessionUsageLimitRecoveryV1,
   copilotSessionId?: string, // Copilot ACP session ID (opaque)
   cursorSessionId?: string, // Cursor ACP session ID (opaque)

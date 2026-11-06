@@ -4171,6 +4171,12 @@ export const en = {
             codebuddy: {
                 title: "CodeBuddy"
             },
+            omp: {
+                title: "Oh My Pi"
+            },
+            hermes: {
+                title: "Hermes Agent"
+            },
             grok: {
                 title: "Grok Build"
             },
@@ -6417,8 +6423,12 @@ export const en = {
         fxSessionIdCopied: 'FX Session ID copied to clipboard',
         droidSessionId: 'Factory Droid Session ID',
         codebuddySessionId: 'CodeBuddy Session ID',
+        ompSessionId: 'Oh My Pi Session ID',
+        hermesSessionId: 'Hermes Agent Session ID',
         droidSessionIdCopied: 'Factory Droid Session ID copied to clipboard',
         codebuddySessionIdCopied: 'CodeBuddy Session ID copied to clipboard',
+        ompSessionIdCopied: 'Oh My Pi Session ID copied to clipboard',
+        hermesSessionIdCopied: 'Hermes Agent Session ID copied to clipboard',
         customAcpSessionId: 'Custom ACP Session ID',
         grokSessionId: "Grok Session ID",
         grokSessionIdCopied: "Grok Session ID copied to clipboard",
@@ -6674,6 +6684,8 @@ export const en = {
             fx: 'FX',
             droid: 'Factory Droid',
             codebuddy: 'CodeBuddy',
+            omp: 'Oh My Pi',
+            hermes: 'Hermes Agent',
             customAcp: 'Custom ACP',
             pi: 'Pi',
             copilot: 'Copilot',
@@ -6684,6 +6696,16 @@ export const en = {
         auggieIndexingChip: {
             on: 'Indexing on',
             off: 'Indexing off',
+        },
+        hermesProfileChip: {
+          title: "Hermes profile",
+          active: "Active profile",
+          activeSubtitle: "Use the profile Hermes has selected",
+          currentlyActive: "Currently active",
+          loading: "Loading profiles…",
+          error: "Couldn't list Hermes profiles",
+          notInstalled: "Hermes isn't installed on this machine",
+          footer: "The profile is fixed when the session starts and is used every time it resumes.",
         },
           model: {
               title: 'MODEL',
@@ -10879,6 +10901,8 @@ settingsSession: {
             fxSubtitleExperimental: 'FX CLI (experimental)',
             droidSubtitleExperimental: 'Factory Droid CLI (experimental)',
             codebuddySubtitleExperimental: 'CodeBuddy Code CLI (experimental)',
+            ompSubtitleExperimental: 'Oh My Pi CLI (experimental)',
+            hermesSubtitleExperimental: 'Hermes Agent CLI (experimental)',
             customAcpSubtitleExperimental: 'Custom ACP CLI (experimental)',
             grokSubtitleExperimental: "Grok Build CLI (experimental)",
             piSubtitleExperimental: 'Pi CLI (experimental)',

@@ -10,7 +10,11 @@ export type PiRpcCommand =
   | { id: string; type: 'get_available_models' }
   | { id: string; type: 'set_model'; provider: string; modelId: string }
   | { id: string; type: 'set_thinking_level'; level: string }
-  | { id: string; type: 'get_commands' };
+  | { id: string; type: 'get_commands' }
+  /** omp: command catalog (`get_commands` is pi's). */
+  | { id: string; type: 'get_available_commands' }
+  /** omp: opt in to the structured `ask` dialog. */
+  | { id: string; type: 'set_ask_dialog'; enabled: boolean };
 
 export type PiRpcCommandWithoutId =
   PiRpcCommand extends infer TCommand

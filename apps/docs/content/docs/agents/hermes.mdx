@@ -1,0 +1,42 @@
+---
+title: Hermes Agent CLI (experimental)
+description: Drive a Hermes Agent gateway you already run from Happier, with sessions, streaming, approvals, clarifying questions, interrupt, and steering.
+---
+
+Hermes Agent by Nous Research runs as a gateway process on your computer.
+Happier connects to that gateway over the same WebSocket protocol Hermes's own
+terminal UI uses (`hermes-gateway-v1`). It does not use ACP.
+
+This agent is experimental and ships in the next Happier version.
+
+## What you need first
+
+Install Hermes from the
+[official repository](https://github.com/NousResearch/hermes-agent) and start
+your Hermes gateway yourself. Happier only connects to a gateway that is already
+running. It never starts, restarts, or stops one.
+
+Happier asks the `hermes` CLI for a one-time connection ticket
+(`hermes -p <profile> gateway attach --json`) every time it connects. If no
+gateway is running, or it is starting, draining, inaccessible, on a different
+profile, or incompatible, Happier tells you so and asks you to start or update
+your Hermes gateway.
+
+## Profiles
+
+You choose a Hermes profile when a session starts. The session keeps that
+profile and resume always uses it; you cannot switch profiles inside a session.
+
+## Start and resume sessions
+
+```bash
+happier hermes
+```
+
+Happier supports fresh and resumed sessions, streaming replies and reasoning,
+tool activity, approvals, clarifying questions, interrupt, steering, and model
+selection. Only the slash commands the gateway supports are offered.
+
+## Related
+
+- [Agent capabilities](/agents/capabilities)
