@@ -320,6 +320,20 @@ describe('HermesGatewayBackend', () => {
       expect(limited.gateway.requests.find((r) => r.method === 'approval.respond')!.params).toMatchObject({ prompt_id: 'ap-3', choice: 'once' });
     });
 
+    it('tells the user when a prompt answer could not be delivered to Hermes', async () => {
+      const permission = makePermissionHandler(() => ({ decision: 'approved' }));
+      const { backend, gateway, messages } = await setup({
+        backend: { permissionHandler: permission.handler },
+        methods: { 'approval.respond': () => { throw new Error('stale_generation'); } },
+      });
+      await backend.startSession();
+      gateway.emit('approval.request', SESSION, approval, { execution_generation: 3 });
+      await settle(120);
+      expect(messages).toContainEqual(expect.objectContaining({
+        type: 'event', name: 'message', payload: { message: expect.stringContaining('could not be delivered') },
+      }));
+    });
+
     it('withdraws a pending approval another viewer already settled', async () => {
       const gate = new Promise<PermissionResult>(() => {});
       const permission = makePermissionHandler(() => gate);
@@ -407,6 +421,30 @@ describe('HermesGatewayBackend', () => {
       await backend.setSessionModel(SESSION, 'anthropic:claude-x');
       const second = gateway.requests.filter((r) => r.method === 'session.mutate')[1]!;
       expect(second.params.expected_revision).toBe(8);
+    });
+
+    it('does not report a model Hermes refused with confirmation_required as applied', async () => {
+      const { backend, messages } = await setup({
+        methods: {
+          'session.mutate': () => ({ status: 'confirmation_required', confirm_required: true, confirm: 'tok', confirm_message: 'Costly model', revision: 8 }),
+        },
+      });
+      await backend.startSession();
+      await settle(80);
+      messages.length = 0;
+      await expect(backend.setSessionModel(SESSION, 'anthropic:claude-y')).rejects.toThrow(/Costly model/);
+      expect(messages.some((m) => m.type === 'event' && m.name === 'current_model_update')).toBe(false);
+    });
+
+    it('treats a deferred model pick as selected and applied on the next turn', async () => {
+      const { backend, messages } = await setup({
+        methods: { 'session.mutate': () => ({ status: 'deferred', model: 'claude-y', revision: 9 }) },
+      });
+      await backend.startSession();
+      await settle(80);
+      messages.length = 0;
+      await backend.setSessionModel(SESSION, 'anthropic:claude-y');
+      expect(messages).toContainEqual(expect.objectContaining({ name: 'current_model_update', payload: { currentModelId: 'anthropic:claude-y' } }));
     });
 
     it('sends an unlisted freeform id as a bare model', async () => {

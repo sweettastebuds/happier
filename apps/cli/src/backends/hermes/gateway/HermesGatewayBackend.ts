@@ -558,6 +558,7 @@ export class HermesGatewayBackend implements AgentBackend {
       });
     } catch (error) {
       logger.debug(`[hermes] ${method} failed`, error);
+      this.emit({ type: 'event', name: 'message', payload: { message: 'Your answer could not be delivered to Hermes. The request may still be waiting in Hermes.' } });
     }
   }
 
@@ -598,12 +599,16 @@ export class HermesGatewayBackend implements AgentBackend {
     const normalized = modelId.trim();
     if (!normalized) return;
     const known = this.modelIndex.get(normalized);
-    await this.mutate('model', known ? { model: known.model, provider: known.provider } : { model: normalized });
+    const result = await this.mutate('model', known ? { model: known.model, provider: known.provider } : { model: normalized });
+    // Hermes reports refusals as ordinary results. `deferred` is accepted and applies on the next turn.
+    if (asNonEmptyString(result?.status) === 'confirmation_required') {
+      throw new Error(asNonEmptyString(result?.confirm_message) ?? 'Hermes needs confirmation before switching to this model; change it in Hermes.');
+    }
     this.currentModelId = normalized;
     this.emit({ type: 'event', name: 'current_model_update', payload: { currentModelId: normalized } });
   }
 
-  private async mutate(operation: string, payload: Record<string, unknown>): Promise<void> {
+  private async mutate(operation: string, payload: Record<string, unknown>): Promise<Record<string, unknown> | null> {
     const client = await this.ensureSessionConnection();
     const result = asRecord(await client.request('session.mutate', {
       session_id: this.sessionId,
@@ -615,6 +620,7 @@ export class HermesGatewayBackend implements AgentBackend {
     }));
     const revision = finiteNumber(result?.revision);
     if (revision !== null) this.revision = revision;
+    return result;
   }
 
   // ---- output --------------------------------------------------------------------------------

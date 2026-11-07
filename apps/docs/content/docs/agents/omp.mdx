@@ -39,7 +39,7 @@ Oh My Pi's approval prompts appear in Happier as ordinary tool approvals.
 ## Limits
 
 - Happier does not give Oh My Pi its own Happier tools or connected-service credentials yet.
-- Very large single frames from `omp` are a known limitation of the current RPC protocol version.
+- Happier uses `omp` RPC protocol version 1, where `omp` shortens oversized frames: very large tool output or messages can appear truncated, with an elision marker, in Happier.
 
 ## Related
 

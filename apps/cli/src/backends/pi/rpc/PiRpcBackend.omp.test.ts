@@ -236,4 +236,17 @@ describe('PiRpcBackend omp flavor', () => {
       answers: [{ id: 'q1', selectedOptions: ['Workspace'], customInput: 'and tests' }],
     });
   });
+
+  it('keeps omp max thinking distinct from xhigh in the published option and set_thinking_level', async () => {
+    const h = createHarness();
+    const session = await h.backend.startSession();
+    await h.backend.waitForSessionModels();
+    const latest = () => [...h.messages].reverse().find((m) => m.type === 'event' && (m as any).name === 'session_models_state') as any;
+    const option = () => latest().payload.availableModels[0].modelOptions[0];
+    expect(option().currentValue).toBe('max');
+    expect(option().options.map((o: { value: string }) => o.value)).toContain('max');
+
+    await (h.backend as any).setSessionConfigOption(session.sessionId, 'reasoning_effort', 'max');
+    expect(h.log().filter((e) => e.command?.type === 'set_thinking_level').map((e) => e.command.level)).toEqual(['max']);
+  });
 });

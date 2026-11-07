@@ -597,6 +597,7 @@ export type Metadata = {
   kiroSessionId?: string, // Kiro ACP session ID (opaque)
   devinSessionId?: string, // Devin ACP session ID (opaque)
   piSessionId?: string, // Pi RPC session ID (opaque)
+  ompSessionId?: string, // Oh My Pi RPC session ID (opaque)
   piSessionFile?: string, // Absolute Pi session file path (preferred resume primitive)
   hermesSessionId?: string, // Hermes gateway session ID (stable logical id, opaque)
   hermesProfileId?: string, // Hermes gateway owner profile identity (the profile home); resume must attach to the same one

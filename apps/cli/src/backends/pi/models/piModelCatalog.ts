@@ -1,4 +1,7 @@
-export type PiThinkingEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type PiThinkingEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** Pi folds `max` into `xhigh` (its top tier is labelled Max); oh-my-pi has a distinct `max` above `xhigh`. */
+export type PiThinkingScale = 'pi' | 'omp';
 
 export type PiModelCatalogEntry = Readonly<{
   id: string;
@@ -7,10 +10,10 @@ export type PiModelCatalogEntry = Readonly<{
   modelOptions?: unknown[];
 }>;
 
-export function normalizePiThinkingEffort(raw: unknown): PiThinkingEffort | null {
+export function normalizePiThinkingEffort(raw: unknown, scale: PiThinkingScale = 'pi'): PiThinkingEffort | null {
   const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   if (value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh') return value;
-  if (value === 'max') return 'xhigh';
+  if (value === 'max') return scale === 'omp' ? 'max' : 'xhigh';
   return null;
 }
 
@@ -28,6 +31,7 @@ export function createPiModelCatalogEntry(params: Readonly<{
   name?: unknown;
   supportsThinking?: boolean;
   thinkingEffort?: unknown;
+  thinkingScale?: PiThinkingScale;
 }>): PiModelCatalogEntry | null {
   const provider = typeof params.provider === 'string' ? params.provider.trim() : '';
   const id = qualifyPiModelId(provider, params.modelId);
@@ -36,7 +40,8 @@ export function createPiModelCatalogEntry(params: Readonly<{
   const name = typeof params.name === 'string' && params.name.trim().length > 0
     ? params.name.trim()
     : id.slice(id.indexOf('/') + 1);
-  const thinkingEffort = normalizePiThinkingEffort(params.thinkingEffort) ?? 'medium';
+  const scale = params.thinkingScale ?? 'pi';
+  const thinkingEffort = normalizePiThinkingEffort(params.thinkingEffort, scale) ?? 'medium';
 
   return {
     id,
@@ -52,7 +57,9 @@ export function createPiModelCatalogEntry(params: Readonly<{
           { value: 'low', name: 'Low' },
           { value: 'medium', name: 'Medium' },
           { value: 'high', name: 'High' },
-          { value: 'xhigh', name: 'Max' },
+          ...(scale === 'omp'
+            ? [{ value: 'xhigh', name: 'XHigh' }, { value: 'max', name: 'Max' }]
+            : [{ value: 'xhigh', name: 'Max' }]),
         ],
       }],
     } : {}),

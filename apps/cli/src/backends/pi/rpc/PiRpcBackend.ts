@@ -1388,7 +1388,7 @@ export class PiRpcBackend implements AgentBackend {
     // Pi's RPC supports `set_thinking_level`. We expose it through the generic model-scoped option id.
     if (normalizedId !== 'reasoning_effort') return;
 
-    const level = normalizePiThinkingEffort(value);
+    const level = normalizePiThinkingEffort(value, this.flavor.id);
     if (!level) return;
 
     await this.sendProviderAffectingCommand({ type: 'set_thinking_level', level }, 30_000);
@@ -3335,6 +3335,7 @@ export class PiRpcBackend implements AgentBackend {
         provider, modelId: id, ...(name ? { name } : {}),
         supportsThinking: model?.reasoning === true,
         thinkingEffort: this.currentThinkingLevel,
+        thinkingScale: this.flavor.id,
       });
       return projected ? [projected] : [];
     });
@@ -3383,7 +3384,7 @@ export class PiRpcBackend implements AgentBackend {
     if (currentModelProvider) {
       this.currentModelProvider = currentModelProvider;
     }
-    this.currentThinkingLevel = normalizePiThinkingEffort(state.thinkingLevel) ?? 'medium';
+    this.currentThinkingLevel = normalizePiThinkingEffort(state.thinkingLevel, this.flavor.id) ?? 'medium';
 
     const normalized: Array<{ id: string; name: string; description: string; modelOptions?: unknown[] }> =
       (this.sessionModelState?.availableModels ?? []).map((m) => ({
