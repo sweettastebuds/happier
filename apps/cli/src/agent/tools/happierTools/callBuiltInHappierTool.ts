@@ -87,6 +87,7 @@ export async function callBuiltInHappierTool(params: Readonly<{
       ctx,
       mode,
       rawSession,
+      invocation: params.invocation,
     },
     createDaemonMemoryActionDeps({
       invoke: async ({ machineId, method, request }) => await callMachineRpc({
@@ -99,6 +100,7 @@ export async function callBuiltInHappierTool(params: Readonly<{
   );
   const actionToolBridge = createActionToolExecutorBridge({
     executor,
+    ...(surface === 'session_agent' ? { messageSource: { sourceSessionId: sessionId, via: 'action' as const } } : {}),
     isActionEnabled: (id) => isActionEnabledByEnv(id, { surface }),
     surface,
     actionsSettings,

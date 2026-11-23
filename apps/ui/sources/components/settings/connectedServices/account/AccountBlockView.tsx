@@ -1,3 +1,4 @@
+import { useLiveQuotaMeterLabel } from '../useLiveQuotaMeterLabel';
 import * as React from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import {
@@ -23,16 +24,26 @@ import { Modal } from '@/modal';
 import type { QuotaResetRow } from '@/sync/domains/connectedServices/buildQuotaResetRows';
 import { resolveSubscriptionEndTime } from '@/sync/domains/connectedServices/resolveSubscriptionEndTime';
 import {
+    resolveConnectedServiceSubscriptionStatus,
+    resolveConnectedServiceSubscriptionStatusLabel,
+    resolveConnectedServiceSubscriptionStatusTone,
+} from '@/sync/domains/connectedServices/subscriptionStatus';
+import {
     isConnectedServiceItemCollapsed,
     resolveConnectedServiceCollapseKey,
     setConnectedServiceItemCollapsed,
 } from '@/sync/domains/connectedServices/resolveConnectedServiceCollapseKey';
 import { useSettingMutable } from '@/sync/store/hooks';
-import type { ConnectedServiceCredentialHealthStatusV1, ConnectedServiceId } from '@happier-dev/protocol';
+import type {
+    ConnectedServiceCredentialHealthStatusV1,
+    ConnectedServiceId,
+    ConnectedServiceQuotaCreditSummary,
+    ConnectedServiceQuotaMeterV1,
+} from '@happier-dev/protocol';
 import type { ProviderAccountSubscriptionV1 } from '@happier-dev/protocol';
 import { t } from '@/text';
 
-import { type AccountUsageRow, type CapacityRingDatum } from './accountBlockModel';
+import { resolveResetLimitLabels, type AccountUsageRow, type CapacityRingDatum } from './accountBlockModel';
 import { ConnectedServiceCapacityAvatar, CONNECTED_SERVICE_GAUGE_BOX, CONNECTED_SERVICE_GAUGE_SIZE } from '../ConnectedServiceCapacityAvatar';
 import { Icon } from '@/components/ui/icons/Icon';
 
@@ -61,7 +72,13 @@ export type AccountBlockQuotaView = Readonly<{
     usageRows: ReadonlyArray<AccountUsageRow>;
     capacityPct: number | null;
     capacityRings: ReadonlyArray<CapacityRingDatum>;
+    /** Provider credits (Codex credits, Claude extra usage); null when the account reports none. */
+    credits?: ConnectedServiceQuotaCreditSummary | null;
+    /** Included limits spent while credits keep the account usable. */
+    creditsOnly?: boolean;
     resetRows: ReadonlyArray<QuotaResetRow>;
+    /** Snapshot meters; names the limits a reset clears in the USAGE vocabulary. */
+    resetLimitMeters?: ReadonlyArray<ConnectedServiceQuotaMeterV1>;
     resetAvailableCount: number;
     pinnedMeterIds: ReadonlyArray<string>;
     togglePinnedMeter: (meterId: string) => void;
@@ -108,6 +125,7 @@ export interface AccountBlockViewProps {
 }
 
 const CHEVRON_SIZE = 16;
+const RESET_USE_HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 } as const;
 
 const stylesheet = StyleSheet.create((theme) => ({
     // Trailing drag handle for pool members — mirrors SessionItem's
@@ -200,6 +218,9 @@ const stylesheet = StyleSheet.create((theme) => ({
         fontSize: 13,
         flexShrink: 1,
     },
+    creditsBalance: {
+        fontVariant: ['tabular-nums'],
+    },
     subscriptionSummary: {
         color: theme.colors.text.primary,
         fontSize: 13,
@@ -239,7 +260,7 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
     resetRow: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'space-between',
         gap: 12,
     },
@@ -250,6 +271,15 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
     resetDetails: {
         flex: 1,
+        gap: 2,
+    },
+    resetTitle: {
+        color: theme.colors.text.primary,
+        fontSize: 14,
+        fontWeight: '500',
+    },
+    useActionTarget: {
+        paddingVertical: 2,
     },
     useAction: {
         color: theme.colors.text.link,
@@ -295,10 +325,15 @@ function resolveResetRowLabel(row: QuotaResetRow): string {
     });
 }
 
-function resolveResetLimitLabel(providerLimitId: string): string {
-    if (providerLimitId === 'five_hour') return t('connectedServices.account.resets.fiveHourLimit');
-    if (providerLimitId === 'seven_day') return t('connectedServices.account.resets.weeklyLimit');
-    return providerLimitId;
+function resolveResetAppliesToLabel(row: QuotaResetRow, meters: ReadonlyArray<ConnectedServiceQuotaMeterV1>): string | null {
+    const ids = row.details?.appliesToProviderLimitIds ?? [];
+    if (ids.length === 0) return null;
+    return t('connectedServices.account.resets.appliesTo', {
+        limits: resolveResetLimitLabels(ids, meters, {
+            fiveHour: t('connectedServices.account.resets.fiveHourLimit'),
+            weekly: t('connectedServices.account.resets.weeklyLimit'),
+        }).join(' · '),
+    });
 }
 
 function resolveResetUnavailableLabel(row: QuotaResetRow): string {
@@ -306,14 +341,6 @@ function resolveResetUnavailableLabel(row: QuotaResetRow): string {
     return reason
         ? t(`connectedServices.account.resets.unavailableReasons.${reason}`)
         : t('common.unavailable');
-}
-
-function resolveSubscriptionStatusLabel(subscription: ProviderAccountSubscriptionV1): string {
-    if (subscription.status === 'none') return t('connectedServices.subscription.none');
-    if (subscription.status === 'unavailable') return t('connectedServices.subscription.unavailable');
-    if (subscription.renewal === 'on') return t('connectedServices.subscription.renewalOn');
-    if (subscription.renewal === 'off') return t('connectedServices.subscription.renewalOff');
-    return t('connectedServices.subscription.renewalUnknown');
 }
 
 function resolveSubscriptionEndsLabel(nowMs: number, endAtMs: number): string {
@@ -325,6 +352,23 @@ function resolveSubscriptionEndsLabel(nowMs: number, endAtMs: number): string {
     return endTime.kind === 'relativeDays'
         ? t('connectedServices.subscription.endsInDays', { days: endTime.days })
         : t('connectedServices.subscription.ends', { date: endTime.date });
+}
+
+function AccountUsageMeter({ row, meterTestID, presented }: Readonly<{
+    row: AccountUsageRow;
+    meterTestID: string;
+    presented: boolean;
+}>) {
+    const caption = useLiveQuotaMeterLabel({
+        resetAtMs: row.resetAtMs,
+        remainingPct: row.remaining === null ? null : row.remaining * 100,
+        detailLabel: row.detailLabel,
+        surface: 'account',
+        presented,
+    });
+    return row.remaining === null
+        ? <Text style={stylesheet.subscriptionMeta}>{caption}</Text>
+        : <MeterBar testID={meterTestID} tone={row.tone} fillFraction={row.remaining} caption={caption} />;
 }
 
 export const AccountBlockView = React.memo<AccountBlockViewProps>((props) => {
@@ -647,6 +691,8 @@ export const AccountBlockView = React.memo<AccountBlockViewProps>((props) => {
         );
     };
 
+    const subscriptionStatus = quota?.subscription ? resolveConnectedServiceSubscriptionStatus(quota.subscription) : null;
+    const subscriptionTone = subscriptionStatus ? resolveConnectedServiceSubscriptionStatusTone(subscriptionStatus) : null;
     const usageContent = quota && quota.loading && !quota.hasSnapshot ? (
         <View testID={`${testID}:usage-skeleton`} style={styles.skeleton} />
     ) : quota ? (
@@ -662,14 +708,14 @@ export const AccountBlockView = React.memo<AccountBlockViewProps>((props) => {
                             <View style={styles.subscriptionStatus}>
                                 <View style={[
                                     styles.subscriptionStatusDot,
-                                    quota.subscription.renewal === 'on'
+                                    subscriptionTone === 'on'
                                         ? styles.subscriptionStatusDotOn
-                                        : quota.subscription.renewal === 'off'
+                                        : subscriptionTone === 'off'
                                             ? styles.subscriptionStatusDotOff
                                             : styles.subscriptionStatusDotUnknown,
                                 ]} />
                                 <Text testID={`${testID}:subscription:renewal`} style={styles.subscriptionSummary}>
-                                    {resolveSubscriptionStatusLabel(quota.subscription)}
+                                    {subscriptionStatus ? resolveConnectedServiceSubscriptionStatusLabel(subscriptionStatus) : null}
                                 </Text>
                             </View>
                         </View>
@@ -705,19 +751,40 @@ export const AccountBlockView = React.memo<AccountBlockViewProps>((props) => {
                                             />
                                     </Pressable>
                                 </View>
-                                {row.remaining !== null ? (
-                                    <MeterBar
-                                        testID={`${testID}:meter:${row.meterId}`}
-                                        tone={row.tone}
-                                        // Remaining-first fill: matches the row's "% left" label and the
-                                        // capacity rings (battery model — see accountBlockModel).
-                                        fillFraction={row.remaining}
-                                        caption={row.detailLabel}
-                                    />
-                                ) : <Text style={styles.subscriptionMeta}>{row.detailLabel}</Text>}
+                                <AccountUsageMeter
+                                    row={row}
+                                    meterTestID={`${testID}:meter:${row.meterId}`}
+                                    presented={expanded}
+                                />
                             </View>
                         </ItemGroupColumn>
                     ))}
+                </ItemSection>
+            ) : null}
+
+            {quota.credits && (quota.credits.balance !== null || quota.creditsOnly) ? (
+                <ItemSection testID={`${testID}:credits`}>
+                    <ItemGroupColumn span={2}>
+                        <View style={styles.usageHeaderRow}>
+                            <Text style={styles.usageLabel} numberOfLines={1}>
+                                {t('connectedServices.account.credits.title')}
+                            </Text>
+                            {quota.credits.balance !== null ? (
+                                <Text testID={`${testID}:credits:balance`} style={[styles.subscriptionMeta, styles.creditsBalance]}>
+                                    {quota.credits.available
+                                        ? t('connectedServices.account.credits.balance', {
+                                            balance: quota.credits.balance.toLocaleString(undefined, { maximumFractionDigits: 0 }),
+                                        })
+                                        : t('connectedServices.account.credits.spent')}
+                                </Text>
+                            ) : null}
+                        </View>
+                        {quota.creditsOnly ? (
+                            <Text testID={`${testID}:credits:included-used`} style={styles.subscriptionMeta}>
+                                {t('connectedServices.account.credits.includedUsed')}
+                            </Text>
+                        ) : null}
+                    </ItemGroupColumn>
                 </ItemSection>
             ) : null}
 
@@ -739,32 +806,38 @@ export const AccountBlockView = React.memo<AccountBlockViewProps>((props) => {
                         const remainingCountLabel = row.details
                             ? t('connectedServices.account.resets.remainingCount', { count: row.details.remainingCount })
                             : null;
+                        const titleLabel = row.title ?? remainingCountLabel ?? resolveResetRowLabel(row);
+                        // One secondary line of facts (expiry, saved count); the inert reason follows.
+                        const metaParts = [
+                            (row.title || row.details) && row.expiresAtMs != null ? resolveResetRowLabel(row) : null,
+                            row.title ? remainingCountLabel : null,
+                        ].filter((part): part is string => !!part);
+                        const unavailableLabel = !row.canUse && (row.title || row.expiresAtMs != null || row.details)
+                            ? resolveResetUnavailableLabel(row)
+                            : null;
+                        const appliesToLabel = resolveResetAppliesToLabel(row, quota.resetLimitMeters ?? []);
                         return (
-                            <ItemGroupColumn key={row.key}>
+                            <ItemGroupColumn key={row.key} span={2}>
                                 <View testID={`${testID}:reset-row:${row.key}`} style={styles.resetRow}>
                                     <View style={styles.resetDetails}>
                                         <Text
                                             testID={row.details && !row.title ? `${testID}:reset-count:${row.key}` : undefined}
-                                            style={styles.resetLabel}
-                                        >{row.title ?? remainingCountLabel ?? resolveResetRowLabel(row)}</Text>
-                                        {(row.title || row.details) && row.expiresAtMs != null ? (
-                                            <Text style={styles.resetLabel}>{resolveResetRowLabel(row)}</Text>
-                                        ) : null}
+                                            style={styles.resetTitle}
+                                        >{titleLabel}</Text>
                                         {row.description ? <Text style={styles.resetLabel}>{row.description}</Text> : null}
-                                        {row.details && row.title ? (
-                                            <Text testID={`${testID}:reset-count:${row.key}`} style={styles.resetLabel}>
-                                                {remainingCountLabel}
-                                            </Text>
+                                        {metaParts.length > 0 ? (
+                                            <Text
+                                                testID={row.details && row.title ? `${testID}:reset-count:${row.key}` : undefined}
+                                                style={styles.resetLabel}
+                                            >{metaParts.join(' · ')}</Text>
                                         ) : null}
-                                        {row.details && row.details.appliesToProviderLimitIds.length > 0 ? (
+                                        {appliesToLabel ? (
                                             <Text testID={`${testID}:reset-applies-to:${row.key}`} style={styles.resetLabel}>
-                                                {t('connectedServices.account.resets.appliesTo', {
-                                                    limits: row.details.appliesToProviderLimitIds.map(resolveResetLimitLabel).join(' · '),
-                                                })}
+                                                {appliesToLabel}
                                             </Text>
                                         ) : null}
-                                        {!row.canUse && (row.title || row.expiresAtMs != null || row.details) ? (
-                                            <Text testID={`${testID}:reset-unavailable:${row.key}`} style={styles.resetLabel}>{resolveResetUnavailableLabel(row)}</Text>
+                                        {unavailableLabel ? (
+                                            <Text testID={`${testID}:reset-unavailable:${row.key}`} style={styles.resetLabel}>{unavailableLabel}</Text>
                                         ) : null}
                                     </View>
                                     <Pressable
@@ -774,6 +847,8 @@ export const AccountBlockView = React.memo<AccountBlockViewProps>((props) => {
                                         accessibilityRole="button"
                                         accessibilityState={{ disabled: useDisabled }}
                                         accessibilityLabel={t('connectedServices.account.resets.use')}
+                                        hitSlop={RESET_USE_HIT_SLOP}
+                                        style={styles.useActionTarget}
                                     >
                                         {rowPending ? (
                                             <ActivitySpinner size={14} />

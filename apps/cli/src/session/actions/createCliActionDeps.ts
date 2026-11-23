@@ -70,7 +70,7 @@ import { setSessionModel } from '@/session/services/setSessionModel';
 import { setSessionConfigOption } from '@/session/services/setSessionConfigOption';
 import { setSessionMode } from '@/session/services/setSessionMode';
 import { setSessionPermissionMode } from '@/session/services/setSessionPermissionMode';
-import { setSessionTitle } from '@/session/services/setSessionTitle';
+import { setSessionTitle, SessionAgentTitleUpdateDenied } from '@/session/services/setSessionTitle';
 import { waitForSessionIdle } from '@/session/services/waitForSessionIdle';
 
 import type {
@@ -601,6 +601,7 @@ export function createCliActionDeps(params: Readonly<{
   }> | null;
   getCallerPermissionMode?: (() => string | null | undefined) | null;
   currentSessionPermissionAuthority?: 'trusted_runtime' | 'ambient_context';
+  invocation?: 'cli' | 'session_agent_bridge';
   getCurrentSessionBackendTarget?: (() => BackendTargetRefV1 | null | undefined) | null;
   resumeInactiveSessionWhenUsageLimitReady?: ResumeInactiveSessionWhenUsageLimitReady;
   checkRuntimeAuthUsageLimitRecovery?: (input: Readonly<{ sessionId: string; attemptId: string; resumePromptMode?: 'standard' | 'off' | 'custom' }>) => Promise<unknown>;
@@ -1650,7 +1651,7 @@ export function createCliActionDeps(params: Readonly<{
     },
     ...(approvalsStore ?? {}),
     ...inventoryDeps,
-    sessionSendMessage: async ({ sessionId, message, kind, from, localId, requestedAction, wait, timeoutSeconds, permissionModeOverride, modelOverride, callerSurface, callerPermissionMode }) => {
+    sessionSendMessage: async ({ sessionId, message, provenance, kind, from, localId, requestedAction, wait, timeoutSeconds, permissionModeOverride, modelOverride, callerSurface, callerPermissionMode }) => {
       if (!params.credentials) {
         return { ok: false, errorCode: 'not_authenticated', error: 'not_authenticated' };
       }
@@ -1672,6 +1673,7 @@ export function createCliActionDeps(params: Readonly<{
         credentials: params.credentials,
         idOrPrefix: sessionId,
         message: String(message ?? ''),
+        ...(provenance ? { provenance } : {}),
         ...(kind ? { kind } : {}),
         ...(from !== undefined ? { from } : {}),
         ...(localId ? { localId } : {}),
@@ -1702,11 +1704,24 @@ export function createCliActionDeps(params: Readonly<{
       return res;
     },
 
-    sessionStop: async ({ sessionId }) => {
+    sessionStop: async ({ sessionId, context }) => {
       if (!params.credentials) {
         return { ok: false, errorCode: 'not_authenticated', error: 'not_authenticated' };
       }
-      return await requestSessionStop({ credentials: params.credentials, idOrPrefix: sessionId });
+      // defaultSessionId can name the target. Only explicit tool origin or this
+      // process's session identifies the requester; an approver is not the caller.
+      const requestingSessionId = context?.approvalOrigin?.sessionId
+        ?? context?.messageSource?.sourceSessionId
+        ?? (!context?.bypassApprovals && params.sessionId !== 'cli-global' ? params.sessionId : undefined);
+      return await requestSessionStop({
+        credentials: params.credentials,
+        idOrPrefix: sessionId,
+        source: {
+          ...(context?.surface ? { surface: context.surface } : {}),
+          ...(requestingSessionId ? { requestingSessionId } : {}),
+          ...(context?.approvalOrigin?.toolCallId ? { toolCallId: context.approvalOrigin.toolCallId } : {}),
+        },
+      });
     },
 
     sessionTitleSet: async ({ sessionId, title }) => {
@@ -1717,11 +1732,23 @@ export function createCliActionDeps(params: Readonly<{
       if (!normalizedTitle) {
         return { ok: false, errorCode: 'invalid_parameters', error: 'invalid_parameters' };
       }
-      const res = await setSessionTitle({ credentials: params.credentials, idOrPrefix: sessionId, title: normalizedTitle });
-      if (!res.ok) {
-        return { ok: false, errorCode: res.code, error: res.code, ...(res.candidates ? { candidates: res.candidates } : {}) };
+      try {
+        const res = await setSessionTitle({
+          credentials: params.credentials,
+          idOrPrefix: sessionId,
+          title: normalizedTitle,
+          ...(params.invocation === 'session_agent_bridge' ? { sessionAgentSettings: await readActionAccountSettings() } : {}),
+        });
+        if (!res.ok) {
+          return { ok: false, errorCode: res.code, error: res.code, ...(res.candidates ? { candidates: res.candidates } : {}) };
+        }
+        return { ok: true, sessionId: res.sessionId, title: normalizedTitle };
+      } catch (error) {
+        if (error instanceof SessionAgentTitleUpdateDenied) {
+          return { ok: false, errorCode: error.code, error: error.code };
+        }
+        throw error;
       }
-      return { ok: true, sessionId: res.sessionId, title: normalizedTitle };
     },
 
     sessionPermissionModeSet: async ({ sessionId, permissionMode }) => {

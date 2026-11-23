@@ -1,5 +1,18 @@
 # Pending delivery architecture
 
+## Idleness evidence (development)
+
+The single-session `GET /v2/sessions/:sessionId` response includes optional
+`pendingBlockedNoEffectCount`: queued blocked inputs whose protocol delivery
+status proves that no provider effect is possible. The database reads this count
+with the session's existing Pending counters in one snapshot. Uncertain delivery,
+unknown reasons, and missing reasons do not contribute to this proof.
+
+The CLI subtracts only this proven subset when checking for an in-flight turn.
+An older server's missing proof preserves conservative treatment of all Pending
+input. `pendingCount` and `pendingBlockedCount` keep their existing meanings;
+list and socket payloads do not carry the additional detail-only count.
+
 ## Explicit non-interrupting delivery (development)
 
 **Steer now** requests immediate delivery of the exact Pending row without
@@ -32,11 +45,18 @@ itself does not establish provider acceptance of that follow-up.
 ## Composer busy-steer policy (development)
 
 `decideSessionMessageDelivery` owns the requested action for ordinary composer
-sends. Both configured delivery modes, **Queue in agent** and **Pending until
-ready**, honor **Steer immediately** by durably enqueuing `steer_if_active` when
-the session supports steering. An explicit per-send Pending intent or the
-**Server pending** busy policy keeps `enqueue`. Runtime readiness and payload
-steerability still gate delivery through the existing Pending owner.
+sends. With a Pending-capable CLI, the `agent_queue` and `server_pending`
+values of `sessionMessageSendMode` take the same durable Pending path, so the
+settings screen exposes one choice (**Steer into the current turn**, **Queue
+until the turn ends**, **Interrupt and send**) through
+`resolveSessionBusySendBehavior` / `getSessionBusySendBehaviorSettings` in
+`submitMode.ts`. It writes the two existing keys, so older clients keep reading
+them. A `steer_immediately` busy policy durably enqueues `steer_if_active` when
+the session supports steering; an explicit per-send Pending intent or the
+`server_pending` busy policy keeps `enqueue`. Runtime readiness and payload
+steerability still gate delivery through the existing Pending owner, and a
+`steer_if_active` row that cannot steer the active turn shows the
+`steer_unavailable_waiting_for_turn` wait reason.
 
 The existing-session composer's send button offers per-message choices on long
 press (or right-click on web): **Steer now** when steering is supported, **Queue**,
@@ -311,8 +331,10 @@ turns unresolved delivery claims into `delivery_outcome_uncertain`.
 Pending Queue V2 remains the sole durable owner of message custody, ordering, and exact-row actions. An inactive-session start request is a small session-level authorization for one exact eligible queued row; it is not another message-delivery state machine and does not change that row's delivery priority.
 
 - The server transaction that mutates Pending rows is the only writer of the current activation authorization. Pending Input V2 accepts `resumeWhenAvailable` as a mutation command, applies it atomically to the existing Session authorization, and never persists it as a second row-level desired state.
+- In development, explicit `steer_now` requests authorize runtime activation just like `send_now`, unless the mutation explicitly sets `resumeWhenAvailable: false`. The row retains its non-interrupting steering action. Ordinary `enqueue` and conditional `steer_if_active` requests need an explicit resume authorization.
 - `Session.lastActiveAt` is the lifecycle fence. An authorization at or before that value is stale and is not projected. Publisher activity therefore invalidates an old start request without a second client-owned timestamp.
 - The Pending activation hint is lossy notification only. The authorization persisted on `Session` is authoritative.
+- A retained resume recipe may name a replaced Machine. Activation uses the existing authenticated Machine-locality resolver to recognize its successor and targets that daemon without rewriting historical Session metadata. An unrelated or unverified Machine remains ineligible to start the Session.
 - The daemon on the session's exact owning machine is the only unattended starter. It consumes live hints and one finite reconnect scan through the same activator, re-reads the session and exact Pending row, and then uses the existing inactive-session resume path.
 - Machine unreachability leaves the request in `waiting`. A genuine terminal inability to start records `failed`; it is not retried merely because a daemon reconnects. When the machine is reachable, explicit **Retry** uses the canonical manual resume action. While it is offline, **Process when online** re-arms the same exact Session authorization without changing the row's delivery action.
 - Current clients delegate unattended starts only when the server advertises Pending Input V2 and the exact target machine advertises daemon activation support. Otherwise they retain the released direct-resume compatibility path.

@@ -151,11 +151,12 @@ const SAFEGUARD_PAUSE_DIALOG_HEAD = /\bsession paused\b/i;
 const SAFEGUARD_PAUSE_DIALOG_BODY = /\bsafeguards flagged this message\b/i;
 const SAFEGUARD_PAUSE_SWITCH_OPTION = /\bswitch to\s+(.+?)\s*$/i;
 const SAFEGUARD_PAUSE_RETRY_OPTION = /\bedit prompt and retry(?:\s+with\s+(.+?))?\s*$/i;
-// The provider changes the paid alternatives across plans and releases. Recognize the stable
-// failure + chooser + wait semantics, then require the shared strict numbered-dialog parser below.
-// This stays tolerant of labels and option count without matching arbitrary numbered dialogs.
-const USAGE_LIMIT_DIALOG = /(?:\byou(?:['’]ve| have)\s+(?:hit|reached)\s+your\s+(?:session|usage|weekly)\s+limit\b|\/rate-limit-options)[\s\S]{0,1200}\bwhat do you want to do\?[\s\S]{0,700}\bwait\b[^\n]{0,120}\blimit\b[^\n]{0,120}\breset(?:s)?\b/i;
-const CROPPED_USAGE_LIMIT_DIALOG = /\bwhat do you want to do\?[\s\S]{0,400}(?:❯|>)\s*1\.\s*[^\n]{0,120}\bwait\b[^\n]{0,120}\blimit\b[^\n]{0,120}\breset(?:s)?\b/i;
+// The failure heading can be cropped and paid alternatives vary. Read semantics from the
+// parsed choices so neither focus nor option index changes recognition. Claude 2.1.316's
+// usage-based chooser shortens the cancel choice to "Stop" alongside automatic continuation.
+const USAGE_LIMIT_DIALOG_HEADING = /\bwhat do you want to do\?/i;
+const USAGE_LIMIT_WAIT_OPTION = /\bwait\b[^\n]*\blimit\b[^\n]*\breset(?:s)?\b/i;
+const USAGE_LIMIT_AUTOMATIC_OPTION = /^wait here, then continue automatically(?: shortly| at .+| when the limit resets)$/i;
 // Live probe 2026-06-11 (Claude Code 2.1.173, tmux): `/effort <level>` on a conversation cached at a
 // different effort opens "Change effort level? … ❯ 1. Yes, switch to <level>  2. No, go back".
 // Escape / "No, go back" prints `Kept effort level as <current>` (incident cmq8y3nlx, L6).
@@ -219,6 +220,10 @@ const EFFORT_STATUS_LINE = /\beffort:\s*([a-z]+)\b/im;
 // participate in the SAME last-input selection: an old shell capture cannot outrank a newer normal
 // draft, and an old normal composer cannot make the active shell prompt ready for ordinary input.
 const COMPOSER_LINE = /(?:^|\n)[^\S\n]*(?:[│|][^\S\n]*)?((?:>|›|❯)(?![^\S\n]*(?:\d+\.|[◯◉○●◐◑]))|!(?=[\s\S]*\n[^\S\n]*! for shell mode(?:\s|$)))[^\S\n]*(.*?)[^\S\n]*(?:[│|][^\S\n]*)?(?:\n|$)/;
+// A scrolled native composer replaces its hidden prompt row with an overflow border.
+// Require the complete bordered, indented viewport; arbitrary transcript tails are not input.
+// Leave the next row's delimiter unconsumed so a newer prompt starts outside this match.
+const SCROLLED_COMPOSER = /(?:^|\n)─+[^\S\n]+↑[^\S\n]+[1-9]\d*[^\S\n]+more[^\S\n]+─+\n((?:(?:[^\S\n][^\n]*)?\n)+)─+(?=\n|$)/;
 const SLASH_SUGGESTION_LINE = /(?:^|\n)[^\S\n]*\/[a-z][a-z0-9-]*\b/i;
 // Agents/selection panel (live capture 2026-06-12 11:50, runner pid 58731): the selector header
 // renders `↑/↓ to select` and the focus cursor renders as `❯ ◯ <agent-type> <title>` rows. The
@@ -464,6 +469,25 @@ function readComposerState(
     content: continuation.length === 0 ? content : [content, ...continuation].join('\n'),
     shellContent: null,
     cursorRelation,
+  };
+}
+
+function readScrolledComposerState(
+  text: string,
+  match: RegExpExecArray,
+  context?: ClaudeScreenParseContext | undefined,
+): ReturnType<typeof readComposerState> {
+  const content = (match[1] ?? '').split('\n').map((line) => line.trim()).join('\n').trim();
+  const headerLine = lineIndexAt(text, match.index + match[0].indexOf('─'));
+  const footerLine = headerLine + (match[1] ?? '').split('\n').length;
+  const cursor = context?.cursor;
+  const shellMode = /(?:^|\n)[^\S\n]*! for shell mode(?:\s|$)/.test(text.slice(match.index + match[0].length));
+  return {
+    content: shellMode ? null : content,
+    shellContent: shellMode ? content : null,
+    cursorRelation: !shellMode && cursor && cursor.y > headerLine && cursor.y < footerLine
+      ? 'inside_or_after_content'
+      : null,
   };
 }
 
@@ -727,20 +751,36 @@ function resolveDialogSelectionPresentation(
 export function parseClaudeScreenState(rawText: string, context?: ClaudeScreenParseContext): ClaudeScreenState {
   const text = normalizeCapturedScreen(rawText);
   const visibleTail = tailLines(text, 30);
-  const usageLimitSemanticMatch = (
-    USAGE_LIMIT_DIALOG.test(visibleTail)
-    || CROPPED_USAGE_LIMIT_DIALOG.test(visibleTail)
-  );
-  const usageLimitDialogCandidate = usageLimitSemanticMatch
-    ? resolveGenericNumberedDialog(visibleTail, 1)
+  const numberedDialogCandidate = resolveGenericNumberedDialog(visibleTail, 1);
+  const selectionCandidate = resolveDialogSelectionPresentation(visibleTail, numberedDialogCandidate);
+  const usageLimitSemanticMatch = USAGE_LIMIT_DIALOG_HEADING.test(visibleTail)
+    && selectionCandidate !== null
+    && (
+      selectionCandidate.options.some((option) => USAGE_LIMIT_WAIT_OPTION.test(option.label))
+      || (
+        selectionCandidate.options.some((option) => /^stop$/i.test(option.label))
+        && selectionCandidate.options.some((option) => USAGE_LIMIT_AUTOMATIC_OPTION.test(option.label))
+      )
+    );
+  const numberedDialog = numberedDialogCandidate
+    && (usageLimitSemanticMatch || numberedDialogCandidate.dialog.options.length >= 2)
+    ? numberedDialogCandidate
     : null;
-  const numberedDialog = usageLimitDialogCandidate ?? resolveGenericNumberedDialog(visibleTail);
   const visibleNumberedDialog = numberedDialog?.dialog ?? null;
-  const visibleDialogSelection = resolveDialogSelectionPresentation(visibleTail, numberedDialog);
+  const visibleDialogSelection = numberedDialogCandidate && !numberedDialog
+    ? resolveDialogSelectionPresentation(visibleTail, null)
+    : selectionCandidate;
   const rewindSelectionVisible = REWIND_SELECTION.test(visibleTail);
   const lastComposerMatch = lastMatch(new RegExp(COMPOSER_LINE.source, `${COMPOSER_LINE.flags}g`), text);
+  const scrolledMatch = lastMatch(new RegExp(SCROLLED_COMPOSER.source, 'g'), text);
+  const activeScrolledMatch = scrolledMatch
+    && (!lastComposerMatch || lastComposerMatch.index < scrolledMatch.index + scrolledMatch[0].length)
+    ? scrolledMatch
+    : null;
   // A notice above the current composer belongs to transcript history, not the active footer.
-  const currentFooter = lastComposerMatch
+  const currentFooter = activeScrolledMatch
+    ? text.slice(activeScrolledMatch.index + activeScrolledMatch[0].length)
+    : lastComposerMatch
     ? text.slice(lastComposerMatch.index + lastComposerMatch[0].length)
     : visibleTail;
   const usageLimitWaitVisible = USAGE_LIMIT_WAIT_FOOTER.test(currentFooter);
@@ -767,7 +807,9 @@ export function parseClaudeScreenState(rawText: string, context?: ClaudeScreenPa
   // otherwise the selected row masquerades as a draft and suppresses the generic dialog path.
   const composerState = rewindSelectionVisible || visibleDialogSelection?.kind === 'focused'
     ? { content: null, shellContent: null, cursorRelation: null }
-    : readComposerState(text, rawText, lastComposerMatch, context);
+    : activeScrolledMatch
+      ? readScrolledComposerState(text, activeScrolledMatch, context)
+      : readComposerState(text, rawText, lastComposerMatch, context);
   const composerContent = composerState.content;
   const hasComposer = composerContent !== null;
   // A host cursor on the parsed composer is direct evidence that the composer, not an older

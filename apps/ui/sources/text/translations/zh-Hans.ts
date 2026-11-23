@@ -627,6 +627,7 @@ export const zhHans: TranslationStructure = {
             composerFocus: '聚焦输入框',
             composerSendImmediate: '切换发送方式（排队 / 引导）',
             composerSendInterrupt: '中断并发送',
+            composerSendAlternateAfterSend: "发送并开始另一个 / 打开",
             composerSendPending: '发送到待处理队列',
             commandPaletteOpen: '打开命令面板',
             modeCycle: '切换模式',
@@ -780,6 +781,7 @@ export const zhHans: TranslationStructure = {
     details: "详情",
     fieldStatus: "状态",
     fieldAction: "动作",
+    fieldFailureReason: "失败原因",
     approve: "批准",
     reject: "拒绝",
     loadError: "加载审批失败。",
@@ -1252,6 +1254,7 @@ export const zhHans: TranslationStructure = {
     send: "发送",
     attach: "附加",
     addImage: "添加图片",
+    takePhoto: "拍照",
     addFile: "添加文件",
     linkFile: "链接文件",
     files: "文件",
@@ -2495,7 +2498,7 @@ export const zhHans: TranslationStructure = {
           renewal: "续订",
           renewalOn: "开启",
           renewalOff: "关闭",
-          renewalUnknown: "未知",
+          active: "有效",
           renews: ({ date }: { date: string }) => `${date}续订`,
           ends: ({ date }: { date: string }) => `${date}结束`,
           renewsInDays: ({ days }: { days: number }) => `${days}天后续订`,
@@ -2638,6 +2641,7 @@ export const zhHans: TranslationStructure = {
       usageCount: ({ used, limit }: { used: number; limit: number }) =>
         `${used}/${limit} 已用`,
       duration: {
+        seconds: ({ seconds }: { seconds: number }) => `${seconds}秒`,
         now: "现在",
         outdated: "已过期",
         daysHours: ({ days, hours }: { days: number; hours: number }) =>
@@ -2652,6 +2656,12 @@ export const zhHans: TranslationStructure = {
       refreshA11y: "刷新用量和限额",
       usageCaption: "用量",
       resetsCaption: "配额重置",
+      credits: {
+        title: "额度",
+        balance: ({ balance }: { balance: string }) => `${balance} 额度`,
+        spent: "已用完",
+        includedUsed: "套餐内额度已用完 · 可使用额度",
+      },
       usedDetail: ({ used, limit }: { used: string; limit: string }) => `已用 ${used}/${limit}`,
       capacity: ({ percent }: { percent: number }) => `容量 ${percent}%`,
       memberEnabledLabel: "已在池中启用",
@@ -2686,6 +2696,11 @@ export const zhHans: TranslationStructure = {
         confirmMessage: "这会应用一次用量重置以立即恢复配额。此操作无法撤销。",
         confirmCta: "使用重置",
       },
+    },
+    requestErrors: {
+      unreachable: "无法连接到 Happier 服务器。请检查网络或 VPN 连接后重试。",
+      timeout: "Happier 服务器未能及时响应。",
+      serverHttp: ({ status }: { status: string }) => `Happier 服务器返回了错误（${status}）。请稍后重试。`,
     },
     oauthPaste: {
       invalidConfig: "已连接服务配置无效。",
@@ -2730,7 +2745,11 @@ export const zhHans: TranslationStructure = {
       },
       errors: {
         missingState: "重定向 URL 中缺少 OAuth state。",
-        stateMismatch: "OAuth state 不匹配。",
+        stateMismatch: "此授权响应与当前尝试不匹配。请重新开始授权。",
+        rejected: ({ reason }: { reason: string }) => `提供方拒绝了授权：${reason}`,
+        rejectedGeneric: "提供方拒绝了授权。",
+        exchangeOutcomeUnknown: "无法确认登录是否已完成。请检查已连接的账户，如需重新登录，请使用新验证码。",
+        responseKept: "请求未发送。请检查网络连接，然后按“继续”使用已粘贴的响应。",
       },
     },
     oauthEmbedded: {
@@ -3220,6 +3239,8 @@ export const zhHans: TranslationStructure = {
         `已跳过 ${count} 个超过最大附件大小的文件。`,
       noClipboardImageTitle: "剪贴板中没有图片",
       noClipboardImageBody: "请先复制图片，然后将其粘贴为附件。",
+      cameraPermissionDeniedTitle: "需要相机权限",
+      cameraPermissionDeniedBody: "请在设备设置中允许访问相机以拍照。",
     },
   },
 
@@ -3499,7 +3520,7 @@ export const zhHans: TranslationStructure = {
     trayOpenInHappier: '在 Happier 中打开',
     traySettings: '设置…',
     trayStartAtLogin: '登录时启动',
-    trayStopAndQuit: '停止后台服务并退出',
+    trayStopAndQuit: '退出 Happier（停止后台服务）',
     trayStart: '启动',
     trayRestart: '重新启动',
     trayStop: '停止',
@@ -3515,6 +3536,7 @@ export const zhHans: TranslationStructure = {
     trayStopAllConfirmBody: '这台电脑上运行的代理会话将结束，在你再次打开 Happier 之前，你的手机和浏览器都无法连到它。',
     trayStopConfirmAction: '停止',
     trayActionFailedTitle: '没有成功',
+    trayQuitWaitForSystemTasks: "Happier 仍在设置或移除组件。请等待完成后再尝试退出。",
     trayLoginItemFailed: '无法更新 Happier 的登录项',
     traySessions: ({ count }: { count: string }) => `会话：${count}`,
     closeStopTitle: '智能体会话仍在运行',
@@ -3868,6 +3890,39 @@ export const zhHans: TranslationStructure = {
   },
 
   settingsProviders: {
+        sessionRetention: {
+            invalidSettings: "修复 Claude 设置中无效的 JSON，然后重新连接此机器以重试。",
+            permissionDenied: "允许访问 Claude 设置文件，然后重新连接此机器以重试。",
+            writeFailed: "无法保存 Claude 设置。检查文件访问权限，然后重新连接此机器以重试。",
+            managedUnreadable: "无法读取组织设置。更改保留期限前，请检查 Claude 中的权限。",
+            group: "组",
+            title: "会话保留期限",
+            footer: "在各台机器上配置 Claude 用户级保留期限。项目、组织或显式启动设置可能覆盖此设置。",
+            policy: "保留本地历史",
+            unmanaged: "保留现有设置",
+            unmanagedHint: "停止管理保留期限；之前的修改保持不变。",
+            providerDefault: "Claude 默认值",
+            providerDefaultHint: "移除用户级清理期限，使用 Claude 默认值。",
+            year: "1 年（365 天）",
+            century: "100 年（36,500 天）",
+            custom: "自定义天数",
+            customDays: "天数",
+            invalidDays: "请输入正整数天数。",
+            machines: "机器状态",
+            noMachines: "已配对的机器将显示在此处。",
+            native: "原生 Claude",
+            profile: "配置档案",
+            applied: "已配置",
+            unmanagedStatus: "未管理",
+            pending: "等待机器",
+            unknown: "更新 daemon 以报告状态",
+            error: "无法应用保留期限",
+            managed: "组织策略可能覆盖保留期限",
+            offline: "离线 · 上次确认的状态",
+            confirmTitle: "缩短 Claude 会话保留期限？",
+            confirmBody: "较短的期限可能使 Claude 删除较早的本地历史。删除的历史无法恢复。项目或组织设置可能会覆盖此用户设置。",
+            confirmAction: "应用保留期限",
+        },
     title: "AI 提供商设置",
     entrySubtitle: "配置提供商专属选项",
     footer: "配置提供商专属选项。这些设置可能会影响会话行为。",
@@ -4725,6 +4780,8 @@ export const zhHans: TranslationStructure = {
       hiddenInactiveSessionsEmptyStateSubtitle: "非活跃会话在此列表中已隐藏",
       hiddenInactiveSessionsSectionTitle: "非活跃会话",
       hiddenInactiveSessionsSectionSubtitle: "它们在主列表中被隐藏，因为那里只显示活跃聊天",
+    sessionListGroupGitWorktrees: "按仓库分组 Git 工作树",
+    sessionListGroupGitWorktreesSubtitle: "将同一仓库的会话放在一起。关闭后按目录分组。",
     sessionListActiveGrouping: "活跃会话分组",
     sessionListActiveGroupingSubtitle: "选择侧边栏中活跃会话的分组方式",
     sessionListInactiveGrouping: "非活跃会话分组",
@@ -5254,9 +5311,10 @@ export const zhHans: TranslationStructure = {
         overloadAttempt: ({ attempt }: { attempt: number }) => `第${attempt}次`,
       title: "已达到使用限制",
       readyTitle: "使用限制已重置",
-      resetBody: ({ time }: { time: string }) =>
-        `此提供方要求会话等到 ${time} 后再继续。`,
+      resetBody: ({ time, duration }: { time: string; duration?: string }) =>
+        `此提供方要求会话等到 ${time}${duration ? ` (${duration})` : ''} 后再继续。`,
       genericBody: "此提供方要求会话等待后再继续。",
+      stoppedBody: "自动恢复已停止，不会自行重试。请在下方重试。",
       resetCreditBody: ({ count }: { count: number }) =>
         `${count} 次使用重置可用。`,
       resetCreditExpiresBody: ({ count, time }: { count: number; time: string }) =>
@@ -5839,6 +5897,7 @@ export const zhHans: TranslationStructure = {
 	        waitingForRuntimeActivityNotice: '正在等待运行时活动结束',
 	        runtimeActivityUnknownNotice: '正在等待运行时活动状态',
 	        waitingForRuntimeNotice: '正在等待运行时重新连接',
+	        steerUnavailableWaitingForTurnNotice: '暂时无法插入本轮 · 结束后发送',
 	        nonSteerableNotice: "当前轮次在此次模式切换后不能再接受插入。它会在下一轮运行，或使用立即发送来中断。",
 	        steerBlockedTerminalDraftNotice: '等待中：终端输入框中的草稿阻止了消息送达。请在终端中清除草稿或中断本轮。',
 	        clearTerminalComposer: {
@@ -6330,8 +6389,9 @@ export const zhHans: TranslationStructure = {
   },
 
   sessionDrafts: {
-    sectionTitle: '草稿', badge: '草稿', untitled: '未命名草稿', continueEditing: '继续编辑', startAnother: '开始另一份',
-    status: { offline: '离线', syncing: '同步中', conflict: '冲突', machineUnavailable: '机器不可用', attachmentNeedsAttention: '附件需要处理', startInterrupted: '启动中断' },
+    sectionTitle: '草稿', badge: '草稿', untitled: '未命名草稿', continueEditing: '继续编辑', startAnother: '开始另一份', startedOpen: "会话已启动 · 打开",
+    status: { offline: '离线', syncing: '同步中', conflict: '冲突', machineUnavailable: '机器不可用', attachmentNeedsAttention: '附件需要处理', starting: '正在启动', startFailed: '无法启动' },
+    error: { title: '草稿错误', storageDescription: '无法在此设备上保存此草稿。离开前请将文本复制到安全的位置；下次编辑时会重新尝试保存。', encryptionDescription: "此设备无法同步草稿。", showDetailsHint: '显示此草稿出错的原因' },
     new: { action: '新建草稿' }, delete: { action: '删除草稿', confirmTitle: '删除草稿？', confirmDescription: '此草稿将从你的设备中移除。' },
     conflict: { title: '草稿冲突', description: '此字段已在另一台设备上更改。', mine: '此设备', synced: '已同步', useSynced: '使用同步版本', keepDevice: '保留设备版本', copyMine: '复制我的版本', copied: '已复制', copyFailed: '无法复制', field: { text: '文本', mentions: '提及', attachments: '附件', recipient: '接收者', agentContinuation: '代理延续', executionRunDelivery: '运行交付' } },
   },
@@ -6724,8 +6784,12 @@ export const zhHans: TranslationStructure = {
   },
 
   agentInput: {
+      keepKeyboard: { label: "发送后保持键盘打开" },
+      historyPosition: ({ index, total }: { index: number; total: number }) => `${index} / ${total}`,
       sendOptions: {
           title: "发送选项",
+          sendAndStartAnother: "发送并开始另一个",
+          sendAndOpen: "发送并打开会话",
           queue: "加入队列",
           hint: "长按选择发送方式",
       },
@@ -7211,6 +7275,7 @@ export const zhHans: TranslationStructure = {
         dismiss: '关闭问题',
         dismissed: '问题已关闭',
         submissionFailures: {
+            unconfirmed: "Happier 无法确认你的回答。请重试，或打开 Claude 终端查看。",
             update: "请更新 Happier CLI，然后重试。",
             reconnect: "请重新连接此会话，然后重试。",
             retry: "无法接受该答案。请检查后重试。",
@@ -8080,6 +8145,7 @@ export const zhHans: TranslationStructure = {
 settingsSession: {
     terminalHostTitle: '新会话的终端宿主',
     terminalHostNone: '不使用终端宿主',
+    newSessionAfterSend: { title: "发送后", footer: "选择从新会话编辑器发送时的行为。长按发送可为单条消息选择另一种方式。", openTitle: "打开会话", openSubtitle: "会话启动后立即前往。", startAnotherTitle: "留下并开始另一个", startAnotherSubtitle: "在后台继续启动，并打开新的草稿。" },
     newSessionDraftEntry: {
         title: '新会话草稿',
         footer: '选择“新会话”是继续此设备上的草稿，还是打开新草稿。',
@@ -8271,6 +8337,10 @@ settingsSession: {
         resetHiddenSubtitle: '清除本设备上已隐藏的横幅。',
     },
     inputBehavior: {
+        keepFocusTitle: "发送后保持编辑器焦点",
+        keepFocusSubtitle: "留在消息框中，以便立即编写下一条消息。",
+        typeToFocusTitle: "随处输入",
+        typeToFocusSubtitle: "在文本框外直接输入即可跳到消息框。",
         title: '输入行为',
         footer: '设置按 Enter 发送以及消息历史行为。',
         enterToSendEnabledNativeSubtitle: '按 Enter 发送',
@@ -8297,16 +8367,17 @@ settingsSession: {
         manualSubtitle: "始终将消息保留在队列中，直到你恢复会话。",
       },
       title: "消息发送",
-      footer:
-        "控制在代理运行时你发送消息会发生什么。",
-      queueInAgentTitle: "加入代理队列（当前）",
-      queueInAgentSubtitle:
-        "立即写入对话记录；代理准备好后再处理。",
-      interruptTitle: "中断并发送",
-      interruptSubtitle: "终止当前回合，然后立即发送。",
-      pendingTitle: "等待就绪（待发送）",
-      pendingSubtitle:
-        "将消息保留在待发送队列；代理就绪后会拉取。",
+      footer: '选择在代理工作时发送消息会发生什么。',
+      busySend: {
+        addToTurnTitle: '插入当前轮次',
+        addToTurnSubtitle: '代理会立即读取并继续工作，就像在它自己的终端里输入一样。如果它无法在轮次中途接收，消息会在待发送中等到本轮结束。',
+        waitForTurnTitle: '加入队列，等本轮结束',
+        waitForTurnSubtitle: '将消息留在待发送中，你可以编辑或调整顺序，本轮结束后再发送。',
+        interruptTitle: '中断并发送',
+        interruptSubtitle: '停止代理当前的工作并立即发送消息。',
+      },
+      inactiveSessionsTitle: '非活动会话',
+      inactiveSessionsFooter: '在向代理已停止或机器离线的会话发送消息时适用。',
       pendingDrainModeTitle: "待发送队列处理",
       pendingDrainModeFooter:
         "选择代理每次就绪时只处理一条消息，还是一次处理整个待发送队列。",
@@ -8328,17 +8399,6 @@ settingsSession: {
         afterRuntimeIdleTitle: "运行时空闲后",
         afterRuntimeIdleSubtitle:
           "当已跟踪运行时活动仍在进行时，继续保留待发送消息。",
-      },
-      busySteerPolicyTitle: "代理忙碌时（支持引导）",
-      busySteerPolicyFooter:
-        "如果代理支持进行中引导，请选择消息是立即引导还是先进入待发送。",
-      busySteerPolicy: {
-        steerImmediatelyTitle: "立即引导",
-        steerImmediatelySubtitle:
-          "立刻发送并引导当前回合（不中断）。",
-        queueForReviewTitle: "加入待发送",
-        queueForReviewSubtitle:
-          "先放入待发送；稍后使用“立即引导”发送。",
       },
       nonSteerablePromptTitle: '当消息无法引导当前回合时',
       nonSteerablePromptFooter: '权限模式更改以及 /clear 或 /compact 无法在回合中途生效。选择智能体忙碌时 Happier 如何处理此类消息。',
@@ -8380,6 +8440,8 @@ settingsSession: {
       customResumePromptPlaceholder: "从你上次停下的地方继续。",
     },
     providerUsageGauge: {
+        numberTitle: "圆环中心数值",
+        numberSubtitle: "选择圆环中数值对应的限额。若不可用，则使用剩余额度最少的限额。",
       title: "提供方使用量",
       footer:
         "为所有账户选择输入框上方的用量仪表。仪表遵循每个池所选的用量限制。收藏的限额会为当前账户添加额外仪表。",
@@ -10473,7 +10535,15 @@ settingsSession: {
     },
     cliPath: {
       title: "终端",
-      footer: "Happier Desktop 只会添加或移除它自己创建的 PATH 条目；由 shell 安装脚本写入的条目保持不变。",
+      footer: "Happier Desktop 只修改它创建的 PATH 条目；Shell 安装程序的条目会保留。",
+      cleanupTitle: "移除 Desktop 组件",
+      cleanupSubtitle: "清理 Desktop 拥有的命令行和后台服务，然后退出。",
+      cleanupConfirmTitle: "移除 Desktop 组件并退出？",
+      cleanupConfirmBody: "仅当没有其他 Desktop 应用需要时，才会移除 Desktop 拥有的命令行文件、PATH 条目和后台服务。共享组件、用户自行安装的组件、会话历史和账户数据都会保留。被移除的服务会停止，可能中断正在运行的会话和远程访问。\n\n清理完成后 Desktop 将退出。然后请通过操作系统移除应用；在 macOS 或便携版 Linux 上，请删除应用包或文件。再次打开 Desktop 可能会重新设置这些组件。",
+      cleanupConfirmAction: "移除组件并退出",
+      cleanupBusy: "正在移除 Desktop 组件…",
+      cleanupFailed: "清理未完成，请重试。",
+      cleanupQuitFailed: "清理已完成，但 Desktop 未能退出。请先退出应用，再将其移除。",
       addTitle: "将 happier 添加到 PATH",
       addSubtitle: "让 happier 命令在新终端中可用。",
       removeTitle: "从 PATH 中移除 happier",
@@ -10575,10 +10645,15 @@ settingsSession: {
   },
 
   message: {
+    provenanceFrom: ({ source }: { source: string }) => `来自 ${source}`,
+    provenanceSession: '会话',
     sessionReferenceUnavailable: "会话不可用",
     sessionReferenceOpen: ({ name }: { name: string }) => `打开会话 ${name}`,
     switchedToMode: ({ mode }: { mode: string }) => `已切换到 ${mode} 模式`,
     discarded: "已丢弃",
+    readAloudA11y: "朗读",
+    stopReadAloudA11y: "停止朗读",
+    readAloudFailed: "无法朗读此消息。请检查语音设置。",
     recoveredHistory: "已恢复的历史记录",
     unknownEvent: "未知事件",
     contextCompactionStarted: "正在压缩上下文...",
@@ -10626,7 +10701,7 @@ settingsSession: {
     sessionRunningLocally:
       "此会话正在本机上以本地模式运行。你可以切换到远程以在应用中控制。",
     sessionRunningLocallyAndRemotely:
-      "此会话已在 OpenCode 中本地附加，同时仍可从应用中控制。",
+      "此会话已在本地连接，同时仍可从应用中控制。",
     switchingToRemote: "正在切换到远程模式…",
     switchToRemote: "切换到远程",
     detachLocalTerminal: "断开终端",
@@ -10704,6 +10779,13 @@ settingsSession: {
     codeCopied: "代码已复制",
     copyFailed: "复制失败",
     mermaidRenderFailed: "渲染 mermaid 图表失败",
+    table: {
+        open: "打开表格",
+        copyCsv: "复制为 CSV",
+        copyMarkdown: "复制为 Markdown",
+        csvLabel: "CSV",
+        viewerTitle: "表格",
+    },
     diffLabel: "差异",
     codeLabel: "代码",
 

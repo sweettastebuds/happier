@@ -1,4 +1,10 @@
 export const HAPPY_PROTOCOL_PACKAGE = '@happier-dev/protocol';
+export {
+  createSessionRepositoryV1Schema,
+  SessionRepositoryV1Schema,
+  readSessionRepositoryV1FromMetadata,
+  type SessionRepositoryV1,
+} from './sessionMetadata/sessionRepositoryV1.js';
 export { lazySchema } from './lazySchema.js';
 export {
   SessionPermissionResponseSchema,
@@ -744,8 +750,12 @@ export {
 } from './connect/connectedServiceAuthGroupMemberRuntimeStatePolicy.js';
 
 export {
+  hasConnectedServiceQuotaCreditHeadroom,
+  isConnectedServiceQuotaCreditMeter,
   resolveConnectedServiceQuotaMeterLimitIdentity,
   selectConnectedServiceQuotaMetersForLimitSelection,
+  summarizeConnectedServiceQuotaCredits,
+  type ConnectedServiceQuotaCreditSummary,
 } from './connect/connectedServiceQuotaLimitSelection.js';
 
 export {
@@ -901,7 +911,9 @@ export {
   normalizeClaudeTaskToolUseToWorkStateItem,
   normalizeClaudeSdkInitSkills,
   normalizeClaudeOauthProfileEntitlement,
+  formatClaudeOauthPlanLabel,
   readClaudeOauthCredentialMetadata,
+  readClaudeOauthProfileSubscriptionStatus,
   readClaudeOauthCredentialOrganizationId,
   type ClaudeOauthCredentialMetadata,
   type ClaudeOauthEntitlementMetadata,
@@ -1607,6 +1619,7 @@ export {
 export { applyInstallablePolicyOverride, resolveInstallablePolicy, type InstallablePolicyOverride } from './installablesPolicy.js';
 export { SOCKET_RPC_EVENTS, type SocketRpcEvent } from './socketRpc.js';
 export type { SocketRpcTargetFailureV1 } from './socketRpc.js';
+export { SESSION_UPDATE_INTEREST_SOCKET_AUTH_FIELD } from './socketSessionUpdateInterest.js';
 export * from './tools/structuredQuestionAnswersV1.js';
 export {
   ChangeEntrySchema,
@@ -1657,6 +1670,13 @@ export {
 } from './updates.js';
 
 export { SENT_FROM_VALUES, SentFromSchema, createSentFromSchema, type SentFrom } from './sentFrom.js';
+export {
+    HAPPIER_SESSION_MESSAGE_PROVENANCE_META_KEY,
+    SessionMessageProvenanceV1Schema,
+    readSessionMessageProvenanceV1,
+    renderSessionMessageProvenanceContextV1,
+    type SessionMessageProvenanceV1,
+} from './sessionMessages/sessionMessageProvenance.js';
 export {
   AuthStatusEnvelopeSchema,
   AuthStatusResultSchema,
@@ -1754,6 +1774,7 @@ export {
   SESSION_USAGE_LIMIT_RECOVERY_OPERATION_RESULT_ERROR_STATUSES_V1,
   SESSION_USAGE_LIMIT_RECOVERY_OPERATION_RESULT_OK_STATUSES_V1,
   SESSION_USAGE_LIMIT_RECOVERY_STATE_FIELD_ID,
+  SESSION_USAGE_LIMIT_RECOVERY_STOPPED_PROBE_ERROR,
   TurnTerminalStatusV1Schema,
   V2SessionByIdNotFoundSchema,
   V2SessionByIdResponseSchema,
@@ -1826,6 +1847,7 @@ export {
   type SessionUsageLimitRecoveryV1,
   buildUsageLimitIssueFingerprint,
   isSessionUsageLimitRecoveryForIssue,
+  isSessionUsageLimitRecoveryStoppedByPolicy,
   readSessionUsageLimitRecoveryForIssue,
   type TurnTerminalStatusV1,
   type V2SessionByIdNotFound,
@@ -2666,6 +2688,7 @@ export {
   type DirectSessionTakeoverPersistRequest,
   type DirectSessionTakeoverPersistResponse,
   type DirectSessionTakeoverPersistStartResponse,
+    DIRECT_SESSION_LINK_TAG_PREFIX,
 } from './directSessions/daemonRpcV1.js';
 
 export {
@@ -3733,4 +3756,19 @@ export {
 export { assertAccountKeyProvisioningAllowed, AccountKeyProvisioningUnavailableError, verifyAccountContentPublicKeyBinding, createAccountContentPublicKeyBindingMessage } from './auth/accountKeyProvisioning.js';
 export { PushNotificationTestRequestSchema, PushNotificationTestResultSchema, type PushNotificationTestResult } from './push/pushNotificationTest.js';
 
-export { projectNotificationQuestion, readNotificationQuestionAnswer, isNotificationQuestionAnswerAction, NotificationQuestionAnswerV1Schema, NOTIFICATION_QUESTION_MAX_CHOICES, type NotificationQuestionAnswerV1 } from './push/notificationQuestionActions.js';
+export {
+  projectNotificationQuestion,
+  readNotificationQuestionAnswer,
+  isNotificationQuestionAnswerAction,
+  resolveNotificationQuestionCategoryId,
+  NotificationQuestionAnswerV1Schema,
+  NOTIFICATION_QUESTION_CHOICES,
+  NOTIFICATION_QUESTION_MAX_CHOICES,
+  type NotificationQuestionAnswerV1,
+} from './push/notificationQuestionActions.js';
+export {
+  ClaudeSessionRetentionPolicyV1Schema,
+  ClaudeSessionRetentionReportV1Schema,
+  type ClaudeSessionRetentionPolicyV1,
+  type ClaudeSessionRetentionReportV1,
+} from './providers/claude/sessionRetention.js';

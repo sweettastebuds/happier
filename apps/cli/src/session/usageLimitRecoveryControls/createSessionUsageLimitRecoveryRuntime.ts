@@ -1,4 +1,4 @@
-import { accountSettingsParse, buildUsageLimitIssueFingerprint, SESSION_USAGE_LIMIT_RECOVERY_METADATA_KEY, SessionUsageLimitRecoveryV1Schema,
+import { accountSettingsParse, buildUsageLimitIssueFingerprint, isSessionUsageLimitRecoveryForIssue, SESSION_USAGE_LIMIT_RECOVERY_METADATA_KEY, SessionUsageLimitRecoveryV1Schema,
   resolveSessionUsageLimitRecoveryResumePromptModeV1, type AccountSettings, type SessionRuntimeIssueV1,
   type SessionUsageLimitRecoveryV1 } from '@happier-dev/protocol';
 import type { Metadata } from '@/api/types';
@@ -40,11 +40,13 @@ export function createSessionUsageLimitRecoveryRuntime(deps: Readonly<{
     const parsed = SessionUsageLimitRecoveryV1Schema.safeParse(deps.getMetadata()?.[SESSION_USAGE_LIMIT_RECOVERY_METADATA_KEY]);
     return parsed.success ? parsed.data : null;
   };
-  const persist = async (intent: SessionUsageLimitRecoveryV1) => {
-    const baseMetadata = deps.getMetadata() ?? {};
+  const persist = async (intent: SessionUsageLimitRecoveryV1, observationBase?: Record<string, unknown>) => {
+    const baseMetadata = observationBase ?? deps.getMetadata() ?? {};
     await deps.updateMetadata((metadata) => {
       return mergeUsageLimitRecoveryFieldIntoMetadata({ latestMetadata: metadata,
-        baseMetadata, candidateMetadata: { [SESSION_USAGE_LIMIT_RECOVERY_METADATA_KEY]: intent } }) as Metadata;
+        baseMetadata, candidateMetadata: { [SESSION_USAGE_LIMIT_RECOVERY_METADATA_KEY]: intent },
+        ...(observationBase ? { mode: 'observed_timing' } : {}),
+      }) as Metadata;
     });
   };
   const scheduler = new UsageLimitRecoveryScheduler({ nowMs,
@@ -133,7 +135,13 @@ export function createSessionUsageLimitRecoveryRuntime(deps: Readonly<{
       const nextMetadata = record?.metadata;
       if (nextMetadata && typeof nextMetadata === 'object') {
         const next = SessionUsageLimitRecoveryV1Schema.safeParse((nextMetadata as Record<string, unknown>)[SESSION_USAGE_LIMIT_RECOVERY_METADATA_KEY]);
-        if (next.success) await persist(next.data);
+        if (next.success) {
+          const observationBase = record?.ok === true && record.status === 'waiting'
+            && next.data.status === 'waiting' && !next.data.runtimeAuthRecoveryAttemptId
+            ? context.metadata
+            : undefined;
+          await persist(next.data, observationBase);
+        }
       }
       return result;
   }
@@ -225,7 +233,7 @@ export function createSessionUsageLimitRecoveryRuntime(deps: Readonly<{
         || issue.usageLimit.recoverability !== 'wait' || deps.getAccountSettings()?.usageLimitRecoverySettingsV1?.mode !== 'auto_wait') return;
       if (!await resolveUsageLimitRecoveryFeatureEnabled() || disposed || acceptedFailure !== issue) return;
       const existing = read();
-      if (existing?.issueFingerprint === buildUsageLimitIssueFingerprint(issue)) return;
+      if (existing && isSessionUsageLimitRecoveryForIssue(issue, existing)) return;
       const resumePromptMode = resolveSessionUsageLimitRecoveryResumePromptModeV1({ existingIntent: existing,
         accountSettings: deps.getAccountSettings() });
       const intent = buildRecoveryIntentFromUsageLimitIssue({ issue, resumePromptMode,

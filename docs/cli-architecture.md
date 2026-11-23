@@ -45,6 +45,82 @@ graph TB
 - **Persistence/config:** `src/persistence.ts` + `src/configuration.ts` manage local state in `~/.happy`.
 - **Agents:** `src/claude`, `src/codex`, `src/gemini` provide provider-specific runners.
 
+## Session message provenance and references (development)
+
+Session-bound Happier action and MCP tools bind their sender independently of the
+selected recipient. The shared action executor passes that host origin through
+`createCliActionDeps` and `sendSessionMessage` into the existing Pending admission
+metadata. `sessionMessages/sessionMessageProvenance.ts` in protocol owns the
+`happierProvenanceV1` session-origin shape, compatible with the corresponding 0.3
+shape, and its tolerant reader. Tool input cannot override the host binding.
+Unbound CLI and external MCP calls do not acquire a sender from their current target.
+Deferred approvals preserve this host origin on the existing approval request;
+replay uses the original origin and never the approving session's identity.
+
+`resolveProviderPromptForDispatch` renders the origin once as
+`<happier_input_context>` alongside the existing session-reference block, for both
+new turns and in-flight steering. For ordinary agent messages,
+`<happier_session_message>` groups this context and the exact JSON-string body;
+replay and restored conversation history stay outside it. Provider-native slash
+commands retain their first-line syntax with the source context appended. Claude's
+local clear/checkpoint/rewind commands retain their raw grammar without model-only
+context or replay seeds. Terminal compaction acceptance uses the shared special
+command parser, including when attribution follows the command on a new line.
+Replay context reserves the framing overhead through the existing total budget.
+The short guidance allows agent requests within the user's authorized scope and
+existing permissions, without treating an agent message as user approval. Replying
+normally completes an existing send wait; a separate message can use
+`session.message.send` with the source session ID. This guidance is included only
+with attributed input, without startup instructions or a persistent received flag.
+Claude, Gemini, Codex and shared ACP preserve input metadata through the shared mode queue; entries
+carrying metadata stay separate so batching cannot attribute a neighbor's text to
+another sender. Their adapters use the same finalizer. Queued metadata has one
+carrier rather than competing mode fields or typed-message fields. Rejected
+Codex steering returns raw input to queue custody for fresh dispatch, avoiding
+nested attribution or repeated reference resolution. This does not introduce the
+0.3 reply action or returned-answer state machine.
+Delivery's existing `source`, `sentFrom`, permissions, and notice behavior retain
+their separate meanings. The UI reads the same protocol shape and displays the
+sender's cached title, exact ID, and transport without fetching another transcript.
+
+Composer session mentions continue to use typed reference metadata rather than
+resolving pasted titles or slugs. Editing a queued message hydrates those bindings
+into the existing composer and saves replacements through the Pending writer's
+canonical structured-input sanitizer. Removed bindings also remove shadowed legacy
+mention aliases so they cannot become active again. Existing attachments and other
+message metadata survive the edit. No referenced transcript is embedded or read
+automatically.
+
+Older messages without provenance remain readable without an inferred identity.
+The `cli-v0.2.20` message-meta reader at `282a8fc3f999df1d104b78daa489317e65d395a6`
+accepts additive metadata through its passthrough schema. Older receiving runtimes
+and UIs retain message delivery but do not render this new attribution; displaying
+it requires updated consumers. This section describes development source, not a
+released-channel guarantee.
+
+## Repository grouping evidence (development)
+
+The shared local session-metadata preparation path records optional
+`sessionRepositoryV1` evidence for automatic project headings. Its protocol-owned
+reader requires the observing `machineId`, the main repository `rootPath`, and the
+observed checkout `worktreePath`. Git's ordered worktree registrations establish
+the main repository; a separate Git administrative directory is not assumed to be
+a working checkout. Independent clones therefore retain separate local identities.
+
+The UI uses valid evidence only for the same machine and a session path inside
+the observed checkout. This changes heading identity, while execution paths and
+saved folder scopes remain checkout-specific. Handoffs and machine reassignment
+discard source-host evidence; the target can publish a fresh local observation.
+Container paths without a proven host mapping, unsupported repository layouts,
+and sessions without evidence retain directory grouping. Existing historical
+sessions are not scanned speculatively.
+
+The field is additive: released older UI metadata readers accept unknown fields,
+and updated readers fall back to directory grouping when evidence is absent or
+invalid. The machine binding also rejects evidence retained by an older handoff
+writer after reassignment. This describes development source, not a released
+channel guarantee.
+
 ## Claude unified questions and approvals (development)
 
 `backends/claude/localPermissions/routeClaudePermissionHook` owns hook delivery
@@ -67,10 +143,17 @@ structured-question projection to preserve Claude's exact displayed scopes;
 the original tool or plan remains in the transcript. Plan controls require a
 live matching request, including after reconnect.
 
+Native permission identity excludes Claude's changing unattended safety countdown.
+The displayed warning remains intact; a changed command, warning or permission
+scope still replaces the request and prevents answering an older prompt.
+The request retains the warning captured when published; Claude owns the timeout.
+
 The existing screen probe observes native rendering and the existing terminal
 drivers navigate verified forms. App question responses are acknowledged only
 after Claude's correlated structured result matches. Native tool results,
 including cancellation results without a completion hook, retire the app waiter.
+Native reviews match the hook-owned questions, requested answers and Submit/Cancel
+controls; the optional “Ready to submit your answers?” prose is not required.
 Terminal successes record the observed answer instead of a canceled request.
 Unknown forms and conflicting local drafts fail closed to terminal interaction.
 This is development source behavior, not a released-channel guarantee.
@@ -98,6 +181,13 @@ rejected best-effort message.
 
 ## Direct-session JSONL read progress (development)
 
+Claude's direct-session mapper and stored-session writer share
+`backends/claude/utils/readClaudeUserMessageText` to project human prompts from
+both string content and SDK text-block arrays into user text messages. Direct
+history, follow and import use the same mapper. Tool/media content, peer deliveries,
+sidechains and meta records retain their structured output path. This correction
+is in development source; it does not establish preview or stable availability.
+
 The shared readers in `api/directSessions/filePaging` own byte paging for native
 JSONL sources. If their existing read allowance cannot complete the next record
 and no source has been consumed, they throw `JsonlRecordTooLargeError` with code
@@ -117,13 +207,13 @@ development source; they do not establish preview or stable availability.
 settlement. Closing a segment freezes its completion or interruption intent and
 separates it from subsequent output. A rejected terminal write retains the full
 snapshot for the next flush with the same local id; unresolved delivery is recorded
-in the default file log. While closed snapshots remain, the writer subscribes to
-the session's existing connection-state events and retries them when its transport
-comes online, including a reconnect that races an in-flight failed write. Retries
-reuse the same local id and terminal state through the session commit queue, without
-waiting for pending-input readiness or a new prompt. The subscription ends when
-the snapshots settle or the writer is discarded. This retention is process-local;
-it does not provide recovery after process exit or replacement of the session client.
+in the default file log. The session retries retained snapshots during connection
+convergence, after the replacement socket settles its Runtime Activity publisher
+registration on relays that support the publisher fence. The writer waits for
+any in-flight attempt, then retries with the original local id and terminal state.
+Pending input materialization becomes eligible once the replay attempt settles.
+The subscription ends when the snapshots settle or the writer is discarded.
+Retention lasts for the lifetime of the session client in the current process.
 
 `createKeyedStreamedTranscriptBridge` keeps writers with active, in-flight, or failed
 segments and releases only drained writers. Codex tool boundaries wait for admission
@@ -490,6 +580,15 @@ holding its `daemon.state.json` and `daemon.state.json.lock` — and only that s
 - `daemon stop` stops the current scope only; `daemon stop --all` and `auth logout --all` deliberately
   stop every relay's daemon.
 
+### Session Stop without a live runtime (development)
+
+The existing Protocol Session Stop owner classifies a missing runtime separately
+from a missing saved Session. CLI and UI both report `already_stopped` with
+`no_runtime_session_inactive` only when an authoritative Session read confirms
+that the saved Session is inactive. An active Session or an unavailable read
+leaves termination unconfirmed; cached UI activity and transport errors do not
+prove that a process stopped.
+
 ### Confirmed daemon stop outcomes (development)
 
 Current 0.2 development source reports `not_running` separately from a confirmed `stopped`
@@ -527,6 +626,12 @@ home on incomplete stop. Restart remains best effort for its stop phase, logs in
 through the default file logger, and requires its existing distinct running identity proof.
 
 ### One CLI update transaction (plan R13 f)
+
+In development source, the post-update repair handoff also runs when the canonical doctor relay
+inventory finds an installed local relay, even if background services need no repair. The newly
+activated CLI owns the diagnosis: repair displays installed relay versions, checks the matching
+channel against the published server release, and asks before updating. Relay update commands
+preserve the installed channel and user/system scope; CLI activation itself does not update relays.
 
 `runManagedCliUpdate` (`packages/cli-common/src/firstPartyRuntime/runManagedCliUpdate.ts`) is the
 only way a managed first-party CLI is updated in place. `happier self update`, the desktop's
@@ -616,6 +721,17 @@ desktop's `cli.update.v1` does not pass that step: it relies on the launcher mov
 not end sessions, but it is unverified on a real Windows host. Remote update is disabled on Windows
 (below).
 
+In current development source (not yet released), self-update and direct `self __install-payload` CLI promotion reject
+invocations below a Happier daemon or daemon-started session before downloads, locks, launcher
+capture or service shutdown. The update owner uses the daemon's Windows process inspection and
+shared session-command classification to walk the calling process's ancestors. Run the update
+from an independent terminal after saving work. System/service ancestors without command lines
+are traversed using their parent PID; command lines are required only for potential Happier hosts.
+This also applies to fresh-install payload promotion. Failure to inspect ancestry still refuses the
+update without modifying the installation, with the inspection reason (no command text) in the error.
+`self update --help` and `-h` print help before update
+dispatch. This prevents self-termination during quiescing; the recovery limits above still apply.
+
 **Rolling back across a migration.** The previous version must read whatever the new one wrote
 before it failed. CLI self-update callers are ≥ 0.2.13; current desktop hsetup can also replace
 an installed 0.2.12 CLI to satisfy its 0.2.13 setup floor. The persisted
@@ -626,9 +742,11 @@ a rollback floor to this transaction before it ships.
 
 **K5 — per-machine update facts.** `readCliUpdateFacts` (`apps/cli/src/cli/runtime/update/cliUpdateFacts.ts`,
 schema `CliUpdateFactsSchema` in `@happier-dev/protocol`) reports `currentVersion`, the ring-filtered
-cached `latestVersion`, `channel`, `installSource` (`managed` only when the running executable is
-inside its ring's recorded install; npm/brew name their own update command), `updateCommand`,
-`canUpdateRemotely` and `lastUpdate`. Every daemon publishes it in its encrypted machine metadata
+cached `latestVersion`, `channel`, `installSource`, `updateCommand`,
+`canUpdateRemotely` and `lastUpdate`. A managed executable belongs to its ring's recorded install,
+including a managed home `bin` shortcut, and the install must retain `current.version`.
+`managedCliShimInstall` owns default/channel shortcut resolution, including Windows hardlinks and
+copy fallbacks; npm/brew installs name their own update command. Every daemon publishes these facts in its encrypted machine metadata
 as `cliUpdate` on its first connect after start and again whenever `last-update.json` changes
 (the daemon watches its install root — no poller; `watchLastCliUpdateResult`), and
 `daemon status --json` extends `cliUpdate` with it. The update-check cache has one writer (`self check`, `recordCliUpdateCheck`) and one
@@ -715,6 +833,13 @@ install root) either way — leaves the definition as it is and starts what is i
 desktop's quiet start of a stopped service (D6) runs the CLI the service already runs and any switch
 goes through the install dry-run's consent and the strict install.
 
+In development source, status and start/restart resolve their expected launcher through
+`resolveDaemonServiceInstallRuntimeTarget`, the installer's canonical launcher policy, without
+acquiring a JavaScript runtime. Once a managed shim is available, start/restart refresh an older
+version-pinned managed bootstrap launcher to that shim. With no stable launcher available they
+retain the already-resolved runtime target. The installed autostart mode and desktop attribution
+are preserved; the managed/user-installed CLI consent boundary above still applies.
+
 **One CLI per computer (plan R12).** That consent is asked at most once per decision: when the
 executor has asked "Let Happier manage it / Keep my own" (prompt `setup.cliChoice`, before any write;
 see [One CLI per computer](binary-runtime.md#one-cli-per-computer-plan-r12)), a recorded **manage**
@@ -793,7 +918,7 @@ login start the mode exists to remove — at the deliberate cost of no crash rel
 on-demand.
 
 In current development source (not yet released), the same shared planner gives current-user
-tasks (daemon, relay host and stack self-host) a native action instead of `powershell.exe`: Task
+tasks (daemon, relay host, stack self-host and its auto-updater) a native action instead of `powershell.exe`: Task
 Scheduler starts `services/<label>/launcher-<build>-<sha256 prefix>/happier-service-launcher.exe
 --wrapper "<services/<label>.ps1>" --diagnostic-log "<services/<label>.launcher.log>"`. It is a
 GUI-subsystem program, so no console window is created for the task; it starts the unchanged
@@ -817,8 +942,11 @@ PowerShell action, and refuses any other registered action. A task still registe
 action keeps working for start, stop and restart, and service status reports it as a launcher
 upgrade (`windowsLauncherUpgradeNeeded`), which doctor and background-service repair treat as needing
 a reinstall. Only `install` rewrites the action and verifies it afterwards; start/restart drift
-refresh rewrites the wrapper but never the task action. SYSTEM tasks and the self-host auto-update task
-still use the PowerShell action.
+refresh rewrites the wrapper but never the task action. CLI self-update repairs a discovered legacy
+user task through that installer before its version-proven restart. It preserves the definition's
+autostart and Desktop ownership, and preserves an external CLI command. A custom command prefix
+that the installer cannot represent is left unchanged with a warning. SYSTEM tasks still use the
+PowerShell action.
 
 ### Desktop control of the background service
 
@@ -920,7 +1048,7 @@ platform opens its menu, built by one native builder (`src-tauri/src/tray/model.
   template (`Sessions: {count}`), including zero; absent/null makes no session-count claim;
 - Open Happier (⌘O), the Updates item when there is one, Settings… (⌘,), the **Start at login** check
   item (the same login-start setting, through `daemon.service.autostart.set.v1`), then **Quit Happier**
-  (⌘Q) and **Stop background services and quit**.
+  (⌘Q) and **Quit Happier (close background services)**.
   Tray Quit, service mutations and the login toggle are disabled while a native service action runs.
 
 The web UI pushes its localized labels (U14), its rows, the setting and the status task's params
@@ -957,7 +1085,7 @@ from its `tauri.conf.json` entry (`"create": false`: the app creates it at start
 implicit exit request, which menu-bar mode holds; only an explicit Quit ends the tray process, and it
 follows the one login-start setting (D11-1): **on**, it leaves every service running — they and the
 tray come back at the next login; **off**, it stops every desktop-managed service first, through the
-same confirmed path as **Stop background services and quit**, and a stop that fails keeps the tray
+same confirmed path as **Quit Happier (close background services)**, and a stop that fails keeps the tray
 alive with the failure shown so it can be retried; **unknown**, it leaves every service as it is. Once
 the setting is known the item says which it will do (*Quit Happier (keep background services
 running)* / *Quit Happier and stop background services*); unknown, it is the plain *Quit Happier*.
@@ -982,6 +1110,17 @@ creation, and the same creation path applies the resolved decorations when the t
 the window. Changing the setting applies the native frame immediately. A failed save retains the
 applied runtime mode and exposes the persistence failure in settings so another change can retry.
 This is unreleased development behavior; compatibility with ActualTitleButtons has not been tested.
+
+On Windows and Linux, `window_frame.rs` owns the main window's remembered physical position,
+inner size and maximized state in `window-state/main-window-frame.json`. One app-lifetime tracker
+survives tray-driven window recreation, debounces changes and flushes pending state on destruction,
+actual app exit and Windows updater installation. Failed writes remain pending for the next flush.
+Controls and persistence share the chrome owner's native presentation-state read; Linux uses
+current GDK flags so stale GTK/Tao flags cannot classify maximized geometry as normal.
+Minimized and fullscreen geometry does not replace the last normal frame. Restoration rejects
+frames without reachable title-bar space on a connected monitor; Linux Wayland does not support
+restoring window position.
+macOS continues to use its native frame autosave. This persistence is development-only.
 
 ### What may repoint this computer's daemon
 
@@ -1557,16 +1696,26 @@ inventory withdraws its choices; a failed discovery retains the last published
 choices. This accommodates V2's initially empty plugin inventory without polling
 or weakening validation against the server's current model inventory.
 
-Herdr-specific transport lives in `integrations/herdr`. The adapter uses direct argv
+Herdr-specific transport lives in `integrations/herdr`. In current development source, the socket client maps
+Windows marker endpoints to Herdr's namespaced pipe address and preserves already-qualified pipe
+names regardless of prefix casing. This transport correction does not enable Windows direct terminal
+attach; the terminal-host resolver still refuses that mode.
+The adapter uses direct argv
 launch, styled screen capture, input, process inspection, and terminal attachment.
 Runtime detection requires a stable Herdr release at or after `0.9.2`, and attach
 and startup also verify the running server's version before using it.
+In development source, Stop and liveness checks for an existing Herdr pane use the
+recorded socket and terminal ID independently of executable detection.
 In the development source, standalone Claude unified uses the default Herdr server,
 matching `happier herdr`; recovery of a retained attachment keeps its recorded server namespace. Daemon
 requests retain their explicitly selected namespace. Generated agent names label
 the panes rather than creating separate Herdr servers.
 Claude unified reuses the existing composer parser and prompt-submission verifier;
 successful terminal writes are not provider acceptance acknowledgements.
+The development parser recognizes Claude's bordered `↑ N more` composer viewport
+when a small terminal hides the prompt marker. Submission verifies the visible
+prompt text through that same parser, without requiring a terminal attachment or
+resize; an unrelated visible draft remains protected.
 In development source, normal and shell prompts share one active-input selection and
 wrapped-text reader. Shell input is verification-only: it cannot make the terminal
 ready for an ordinary message, and only a request starting with `!` can authorize
@@ -1659,6 +1808,23 @@ deadlines and cancellation remain available. A guarded refusal to signal never
 authorizes an unsafe kill: Stop rechecks positive runner exit before deciding
 that termination is incomplete. Transport timeout or disconnect still does not
 prove physical termination.
+When a hosted launch reports a separate runner PID, Stop and planned restart
+use that runner's own process witness for signaling and exit observation. The
+launcher remains the tracking key until exit or promotion, so cleanup settles
+the original tracked session. On POSIX, a terminal hangup now enters the runner's
+existing shutdown path, giving it a chance to close its publisher before the
+terminal host forcibly terminates the process.
+In current 0.2 development source, Stop actions retain the original tool caller
+through approval replay and carry optional diagnostic source fields to the daemon.
+The authenticated HTTP and machine-RPC receivers record their own transport;
+caller-supplied source fields are diagnostic claims, never authorization. Daemon
+file logs record each received request before coalescing and each physical Stop
+attempt, including unknown legacy/internal callers. The existing terminal-host
+kill audit includes that context on signals. Only surface, requesting session ID
+and tool-call ID travel as source metadata; tool input and credentials do not.
+Older daemons ignore the additive metadata. Stop still terminates active work;
+per-surface action availability and approvals remain the policy owners.
+
 After proving runner exit, Stop supplies its captured attachment to that owner:
 if normal exit already removed the descriptor, the same owned-host disposal and
 metadata-retirement pipeline still completes. Borrowed attachments release control
@@ -1671,10 +1837,14 @@ remote serviceability projection does not block retirement of the old local
 evidence. That projection remains untouched. Remote-only recovery without captured
 local custody still refuses a changed target; transport failures remain retryable.
 
-On Linux, startup migration always considers explicitly tracked daemon-owned
-session processes. Sweeping untracked processes from the daemon's cgroup additionally
-requires a service-managed startup in an actual service cgroup; a manually started
-daemon must not transfer unrelated processes from a shared SSH or editor scope.
+On Linux, new daemon-spawned runners use a systemd user scope when the provisioned
+`happier-jobs.slice` policy is available. Otherwise the runner launches directly
+and inherits the launching process's cgroup. The installed daemon service uses
+`KillMode=process` so direct children can survive a daemon restart. Reattachment
+tracks existing sessions in their current cgroups.
+
+The daemon strips the retired self-migration flag from child environments and masks
+it in tmux windows so an older runner snapshot cannot reactivate cgroup writes.
 
 For child-owned same-pane launches, the shared terminal runtime owns the native
 process. Claude unified, runner-managed Codex/OpenCode TUIs, and standalone native
@@ -1723,6 +1893,14 @@ be verified requires reopening the original server; live custom sockets remain
 attachable. There is no parallel Herdr session synchronization service.
 
 ## Daemon architecture
+
+In current 0.2 development source, Windows process inspection in
+`apps/cli/src/daemon/doctor.ts` awaits PowerShell/CIM asynchronously for both
+PID-specific enrichment and the full-discovery fallback. Slow queries keep the
+daemon event loop available; inspection adds no query-local deadline or buffer
+override. Query and JSON failures retain the existing unavailable-evidence result
+and write a file warning without command lines or query output. Process
+classification and PID safety continue to use the same inspection owner.
 
 Startup reattachment and resume of an already-running session reconcile both
 the daemon's session access key and the session's machine routing metadata.
@@ -1867,6 +2045,23 @@ override recorded foreign-home or foreign-scope facts. The child-environment
 builder publishes the resolved home even when the daemon inherited no home override.
 
 ### Connected-service quota refresh outcomes (development)
+
+Quota automation starts only after account settings are ready and Provider Account
+Usage has hydrated from the current connected-service inventory. Startup activation
+runs as background daemon server work, sharing its budget, connectivity gate,
+transient-error classification and sampled warning logs. Transient settings,
+network, timeout, inventory-conflict and server failures retry until activation or
+shutdown. Delays use the existing quota failure-backoff bounds and jitter through
+the daemon's backoff calculator; activation does not hold machine connection open.
+Authentication and invalid-content failures leave the policy disabled and emit a
+warning. Shutdown cancels retry waits and prevents late coordinator creation.
+
+Late activation assigns the same coordinator, schedules current-source refresh and
+starts the same quota loop as successful startup. Connectivity pause/resume reads
+the current loop handle, so a loop created after machine connection still follows
+connectivity changes. Session credential hot-apply warnings include the Session,
+service, available profile/group/generation, mapped failure code and sanitized
+underlying error summary.
 
 An explicit quota refresh records a request, then the daemon quota coordinator
 publishes its outcome through the existing Provider Account Usage owner.
@@ -2025,14 +2220,45 @@ occurred at or before recovery arming is eligible; a failure after arming is
 superseded. When the issue is absent, the turn-status observation supplies that
 boundary. Provider observers can describe one rejection with different timestamps
 and reset details, so report and projection fingerprints are diagnostic evidence,
-not a byte-equality admission requirement. The arming-time check cannot establish
+not a byte-equality admission requirement. The protocol session recovery owner also
+associates daemon-owned usage-limit presentation, controls and reset revalidation
+with an enriched issue when its structured fingerprint identifies the same provider
+and does not contradict a known turn, both observations are at or before arming, and its selected auth source
+still matches. Opaque attempt ids do not associate presentation or controls with
+another issue. Daemon projection may rebase its visible fingerprint through that
+same rule without changing the attempt or arming boundary. The live Session observer
+uses that association too, so an enriched report does not rearm a daemon-owned wait.
+Local unowned recovery
+continues to require the exact captured issue. The arming-time check cannot establish
 the original failure across a restart or re-arming. A superseded live turn or
 archived session settles the old recovery
 terminally instead of waiting for provider proof after suppressing admission.
+Claude's public usage-limit issue is projected through the protocol schema's own
+field set without validating provider values before failure publication. Provider
+observation time, account attribution, sidechain attribution and note kind remain
+internal evidence. Invalid values reach the existing durable admission reduction
+below rather than throwing before local turn failure and recovery reporting. At durable
+mutation validation, an invalid issue on an otherwise valid terminal failure loses
+only the deepest invalid fields or unknown keys first. The same owner revalidates
+before dropping an affected top-level field, then falls back to the shared generic
+failure issue if necessary, with a warning in the default file log. Valid reset and
+account-association details survive optional-field errors. The terminal transition
+remains authoritative; malformed mutation fields still fail validation. Historical
+invalid-issue failures retained only as recovery evidence remain quarantined at
+startup; this admission correction does not replay them. Existing recovery of other
+supported dead-letter shapes is unchanged. The server may settle delayed terminal
+evidence for an older turn without replacing a later-begun current turn, including
+when that current turn has completed. Lists, badges, presence and socket updates
+continue to consume the canonical current-turn projection.
+Runtime-state revision and generation conflicts retry under the existing recovery
+scheduler budget and backoff, rather than immediately cancelling recovery.
 Failure reporting does not wait for its durable projection.
-An unresolved projection is retryable while the live turn matches the projected
-in-progress turn. Without that witness, or when the projected turn is already
-completed or cancelled, recovery settles terminally without admitting a continuation.
+An unresolved in-progress projection remains retryable when there is no local
+active turn, or when the local active turn matches the projection. This allows a
+locally failed turn to publish its durable terminal mutation before continuation
+admission. A conflicting local turn, an archived session or a failure after arming
+still supersedes recovery; completed or cancelled projections settle terminally.
+Projection waits consume the existing recovery attempt budget and backoff.
 Completed projections omit both the failed issue and input origin; they cannot
 distinguish provider task notifications from newer human work. The terminal
 recovery event appears in the session transcript, but cancelled usage-limit
@@ -2126,6 +2352,12 @@ soft threshold. The quota intake precheck uses that same selector; a daemon
 restart cannot make stale or exhausted targets eligible. Failure-driven
 `usage_limit` and `same_provider_account_exhausted` selection retains its existing
 unknown-quota allowance, and pre-turn probes can establish fresh evidence.
+Predictive burn evidence uses the same `probeIfSnapshotOlderThanMs` value as its
+projection horizon. The runtime snapshot store anchors its baseline to the oldest
+observation in the matching generation, effective meter, provider-limit and reset
+context that spans that horizon; readings captured only seconds apart therefore do
+not extrapolate a multi-minute switch. A reset or context change starts a new
+baseline, and non-decreasing, stale or inconsistent observations fail closed.
 Selection also checks learned model exclusions against the requested and applied
 models of the group's live sessions. Generic turn success has no model identity
 and therefore cannot erase a model-specific rejection. This is learned evidence,
@@ -2334,6 +2566,8 @@ Sessions can be started by:
 - Remote requests over RPC (from mobile/web via machine connection).
 
 Daemon session spawning uses `registerCommonHandlers` to expose a controlled RPC surface (shell commands, file operations, search/diff helpers).
+
+In development builds, the regular daemon runner inherits the daemon's D-Bus session address and the tmux runner carries it in its essential window environment. Claude's Agent SDK and unified-terminal launches both use `buildClaudeSubprocessEnv`, which preserves that address. `resolveSpawnChildEnvironment` takes named defaults from the daemon's `HAPPIER_SESSION_FORWARD_ENV` setting and uses the existing explicit environment handoff so the same values reach hosted runners and filtered provider launches. Profile and session values take precedence. Selected values stay in the process launch environment.
 
 In development builds, Claude's metadata producer supplies its explicit non-secret native account-directory override to `createSessionMetadata`, which publishes it in `nativeAgentEnvironmentV1`. `resolveSessionRuntimeSnapshot` restores it before spawn environment validation, with explicit incoming overrides taking precedence. `sessionNativeEnvironment` owns the allowlist also consumed by durable respawn descriptors; arbitrary shell variables and credentials are not copied into metadata. The shared factory does not infer native directories from another Agent's ambient environment. Older session metadata without this optional field retains its existing behavior.
 

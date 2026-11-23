@@ -341,6 +341,7 @@ export class ApiMachineClient {
             scopePrefix: this.machine.id,
             encryptionKey: this.machine.encryptionKey,
             encryptionVariant: this.machine.encryptionVariant,
+            responseMaxBytes: configuration.rpcResponseMaxBytes,
             logger: (msg, data) => logger.debug(msg, data),
             onRegistrationError: (error) => {
                 const probe = classifyMachineTransportErrorToProbeResult(error);
@@ -678,6 +679,7 @@ export class ApiMachineClient {
                 throw new Error('Machine socket is not connected');
             }
             const updated = handler(this.machine.daemonState);
+            if (updated === this.machine.daemonState) return;
 
             const answer = await emitSocketWithAck<any>({
                 socket: this.socket as any,

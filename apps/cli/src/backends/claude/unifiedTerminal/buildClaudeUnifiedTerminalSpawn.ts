@@ -11,6 +11,7 @@ import { getClaudeSystemPrompt } from '../utils/systemPrompt';
 import { isClaudeCliJavaScriptFile, resolveClaudeCliPath } from '../utils/resolveClaudeCliPath';
 import { ensureClaudeJsRuntimeExecutable } from '../utils/ensureClaudeJsRuntimeExecutable';
 import { buildClaudeSubprocessEnv } from '../spawn/buildClaudeSubprocessEnv';
+import { isWindowsSystemEnvKey } from '@/utils/env/windowsSystemEnv';
 import {
   buildClaudeStatuslineOverlaySettings,
   resolveClaudeStatuslineOriginalCommand,
@@ -277,9 +278,11 @@ function buildClaudeArgs<Mode extends EnhancedMode>(
   }
   const permissionMode = resolveClaudeSdkPermissionModeFromEnhancedMode(input.first.mode);
   const settingsOverlay = resolveClaudeLaunchSettingsOverlayArg({
+    args,
     // Connected-service markers belong to the runner and are stripped from Claude's env.
-    env: { ...process.env, ...input.envOverlay },
+    env: { ...process.env, ...input.envOverlay, ...env },
     settingsPath: input.hookSettingsPath,
+    cwd: input.path,
     launchSettings: {
       ...(terminalOptions.ultracodeEnabled ? { ultracode: true } : {}),
       ...(statuslineSettings ? { statusLine: statuslineSettings } : {}),
@@ -344,17 +347,11 @@ function buildTerminalLauncherProcessEnv(baseEnv: NodeJS.ProcessEnv = process.en
     'COLORTERM',
     '__CF_USER_TEXT_ENCODING',
   ]);
-  if (process.platform === 'win32') {
-    for (const key of ['USERPROFILE', 'USERNAME', 'APPDATA', 'LOCALAPPDATA', 'SystemRoot', 'ComSpec', 'PATHEXT', 'WINDIR']) {
-      allowExact.add(key);
-    }
-  }
-
   const allowPrefixes = ['LC_', 'TERM_', 'XDG_', 'HAPPIER_E2E_', 'HAPPY_E2E_'];
   const out: Record<string, string> = Object.create(null);
   for (const [key, value] of Object.entries(baseEnv)) {
     if (typeof value !== 'string') continue;
-    if (isAllowedExactEnvKey(key, allowExact) || allowPrefixes.some((prefix) => key.startsWith(prefix))) {
+    if (isWindowsSystemEnvKey(key) || isAllowedExactEnvKey(key, allowExact) || allowPrefixes.some((prefix) => key.startsWith(prefix))) {
       out[key] = value;
     }
   }

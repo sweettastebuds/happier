@@ -1,4 +1,5 @@
 import { logger } from '@/ui/logger';
+import type { StopSessionRequestSource } from '@happier-dev/protocol';
 import { spawnBackgroundSync } from '@happier-dev/cli-common/process';
 import type { TerminalHostAdapter } from '@/integrations/terminalHost/_types';
 import type { TerminalHostRegistry } from '@/integrations/terminalHost/registry';
@@ -21,6 +22,11 @@ import { configuration } from '@/configuration';
 import { killProcessTree } from '@/agent/runtime/process/killProcessTree';
 
 import { isPidSafeHappySessionProcess } from '../pidSafety';
+import {
+  isTrackedSessionRunnerCurrent,
+  readTrackedSessionRunner,
+  resolveTrackedSessionRunnerSignalTarget,
+} from '../sessionRunnerProcessIdentity';
 import { resolveTrackedSessionTerminalPresentation } from './resolveTrackedSessionTerminalPresentation';
 import type { TrackedSession } from '../types';
 import { recordTerminalHostKillAudit } from '@/daemon/sessionKillAudit';
@@ -32,6 +38,11 @@ import {
 import {
   type ExactTerminalControlServiceabilityRetirement,
 } from './retireTerminalControlServiceability';
+
+export type StopSessionOptions = Readonly<{
+  source?: StopSessionRequestSource;
+  transport?: 'machine_rpc' | 'local_http' | 'internal' | 'marker_fallback';
+}>;
 
 function mapDispositionFailureReason(
   reason: 'legacy_attachment' | 'attachment_mismatch' | 'missing_topology_proof' | 'disposition_in_progress' | 'destroy_failed' | 'retirement_failed' | 'descriptor_retirement_failed',
@@ -54,7 +65,9 @@ async function taskkillWindowsDaemonChild(params: Readonly<{
   pid: number;
   session: TrackedSession;
   normalizedSessionId: string;
+  isCurrent: () => boolean;
   logPidReuseRefusal: (message: string) => void;
+  recordKillAudit: typeof recordTerminalHostKillAudit;
 }>): Promise<boolean> {
   if (!isTrackedChildStillLiveForPid(params.session, params.pid)) {
     params.logPidReuseRefusal(`[DAEMON RUN] Refusing to taskkill PID ${params.pid} for session ${params.normalizedSessionId} (tracked child is no longer live)`);
@@ -66,12 +79,12 @@ async function taskkillWindowsDaemonChild(params: Readonly<{
     expectedProcessCommandHash: params.session.processCommandHash,
     expectedProcessInstanceFingerprint: params.session.processInstanceFingerprint,
   });
-  if (!safe) {
+  if (!safe || !params.isCurrent() || !isTrackedChildStillLiveForPid(params.session, params.pid)) {
     params.logPidReuseRefusal(`[DAEMON RUN] Refusing to taskkill PID ${params.pid} for session ${params.normalizedSessionId} (PID reuse safety)`);
     return false;
   }
 
-  recordTerminalHostKillAudit({
+  params.recordKillAudit({
     actor: 'daemon.stop-session',
     reason: 'stop-session',
     sessionId: params.normalizedSessionId,
@@ -92,72 +105,76 @@ async function taskkillWindowsDaemonChild(params: Readonly<{
 }
 
 async function forceKillTrackedRunner(params: Readonly<{
-  pid: number;
+  trackingPid: number;
   expectedSession: TrackedSession;
+  expectedRunner: ReturnType<typeof readTrackedSessionRunner>;
   pidToTrackedSession: ReadonlyMap<number, TrackedSession>;
   normalizedSessionId: string;
   logPidReuseRefusal: (message: string) => void;
+  recordKillAudit: typeof recordTerminalHostKillAudit;
 }>): Promise<boolean> {
-  const currentSession = params.pidToTrackedSession.get(params.pid);
-  if (currentSession !== params.expectedSession) {
+  const isCurrent = () => params.pidToTrackedSession.get(params.trackingPid) === params.expectedSession
+    && isTrackedSessionRunnerCurrent(params.expectedSession, params.expectedRunner);
+  const runner = resolveTrackedSessionRunnerSignalTarget(params.expectedSession);
+  if (!runner || !isCurrent()) {
     params.logPidReuseRefusal(
-      `[DAEMON RUN] Refusing to SIGKILL PID ${params.pid} for session ${params.normalizedSessionId} (tracked runner identity changed)`,
+      `[DAEMON RUN] Refusing to SIGKILL PID ${params.expectedRunner.pid} for session ${params.normalizedSessionId} (tracked runner identity changed)`,
     );
     return false;
   }
 
   const safe = await isPidSafeHappySessionProcess({
-    pid: params.pid,
-    expectedProcessCommandHash: params.expectedSession.processCommandHash,
-    expectedProcessInstanceFingerprint: params.expectedSession.processInstanceFingerprint,
+    pid: runner.pid,
+    expectedProcessCommandHash: runner.processCommandHash,
+    expectedProcessInstanceFingerprint: runner.processInstanceFingerprint,
   });
-  if (!safe || params.pidToTrackedSession.get(params.pid) !== params.expectedSession) {
+  if (!safe || !isCurrent()) {
     params.logPidReuseRefusal(
-      `[DAEMON RUN] Refusing to SIGKILL PID ${params.pid} for session ${params.normalizedSessionId} (PID reuse safety)`,
+      `[DAEMON RUN] Refusing to SIGKILL PID ${runner.pid} for session ${params.normalizedSessionId} (PID reuse safety)`,
     );
     return false;
   }
 
-  recordTerminalHostKillAudit({
+  params.recordKillAudit({
     actor: 'daemon.stop-session',
     reason: 'stop-session-timeout',
     sessionId: params.normalizedSessionId,
-    runnerPid: params.pid,
+    runnerPid: runner.pid,
     zellijName: null,
     signal: 'SIGKILL',
     callSite: 'daemon.sessions.stopSession.pid',
   });
 
   if (process.platform === 'win32') {
-    const result = spawnBackgroundSync('taskkill', ['/F', '/T', '/PID', String(params.pid)], { stdio: 'ignore' });
+    const result = spawnBackgroundSync('taskkill', ['/F', '/T', '/PID', String(runner.pid)], { stdio: 'ignore' });
     if ((result.status ?? 1) !== 0) {
       logger.debug(
-        `[DAEMON RUN] Forced taskkill failed for session ${params.normalizedSessionId} (pid=${params.pid})`,
+        `[DAEMON RUN] Forced taskkill failed for session ${params.normalizedSessionId} (pid=${runner.pid})`,
       );
       return false;
     }
     logger.debug(
-      `[DAEMON RUN] Forced taskkill requested for session process tree ${params.normalizedSessionId} (pid=${params.pid})`,
+      `[DAEMON RUN] Forced taskkill requested for session process tree ${params.normalizedSessionId} (pid=${runner.pid})`,
     );
     return true;
   }
 
   try {
-    if (params.expectedSession.startedBy === 'daemon' && params.expectedSession.childProcess) {
-      if (!isTrackedChildStillLiveForPid(params.expectedSession, params.pid)) {
+    if (params.expectedSession.startedBy === 'daemon' && params.expectedSession.childProcess?.pid === runner.pid) {
+      if (!isTrackedChildStillLiveForPid(params.expectedSession, runner.pid)) {
         return false;
       }
       await killProcessTree(params.expectedSession.childProcess, { graceMs: 1 });
     } else {
-      await killProcessTree({ pid: params.pid }, { graceMs: 1 });
+      await killProcessTree({ pid: runner.pid }, { graceMs: 1 });
     }
     logger.debug(
-      `[DAEMON RUN] Requested forced process-tree termination for session ${params.normalizedSessionId} (pid=${params.pid})`,
+      `[DAEMON RUN] Requested forced process-tree termination for session ${params.normalizedSessionId} (pid=${runner.pid})`,
     );
     return true;
   } catch (error) {
     logger.debug(
-      `[DAEMON RUN] Failed to force-kill session ${params.normalizedSessionId} (pid=${params.pid}):`,
+      `[DAEMON RUN] Failed to force-kill session ${params.normalizedSessionId} (pid=${runner.pid}):`,
       error,
     );
     return false;
@@ -201,14 +218,22 @@ export function createStopSession(params: Readonly<{
   requireTerminalTopologyProof?: boolean;
   /** Exact persisted topology for reconstructed dead-runner candidates not represented by spawn options. */
   provenTerminalHostKindsByPid?: ReadonlyMap<number, TerminalHostAdapter['kind']>;
-}>): (sessionId: string) => Promise<StopSessionResult> {
+}>): (sessionId: string, options?: StopSessionOptions) => Promise<StopSessionResult> {
   const { pidToTrackedSession } = params;
   const logPidReuseRefusal = params.logPidReuseRefusal ?? ((message: string): void => logger.warn(message));
   const logWarning = params.logWarning ?? ((message: string, ...args: unknown[]): void => logger.warn(message, ...args));
 
   // Stop a session by sessionId or PID fallback
-  return async (sessionId: string): Promise<StopSessionResult> => {
+  return async (sessionId: string, options: StopSessionOptions = {}): Promise<StopSessionResult> => {
     const stopStartedAtMs = Date.now();
+    const requestContext = {
+      requestSource: options.source ?? null,
+      requestTransport: options.transport ?? 'internal',
+    };
+    logger.infoFile('[DAEMON STOP] Attempting Stop', { event: 'session_stop_attempt', sessionId, ...requestContext });
+    const recordKillAudit: typeof recordTerminalHostKillAudit = (record) => {
+      recordTerminalHostKillAudit({ ...record, ...requestContext });
+    };
     logger.debug(`[DAEMON RUN] Attempting to stop session ${sessionId}`);
 
     const normalizedSessionId = String(sessionId ?? '').trim();
@@ -217,7 +242,7 @@ export function createStopSession(params: Readonly<{
     const fallbackPid = isPidFallback ? Number.parseInt(normalizedSessionId.replace('PID-', ''), 10) : NaN;
 
     const pidsToStop: number[] = [];
-    const expectedTrackedSessionsByPid = new Map<number, TrackedSession>();
+    const expectedByTrackingPid = new Map<number, { session: TrackedSession; runner: ReturnType<typeof readTrackedSessionRunner> }>();
     for (const [pid, session] of pidToTrackedSession.entries()) {
       const happySessionId = typeof session.happySessionId === 'string' ? session.happySessionId : '';
       const existingSessionId =
@@ -230,7 +255,7 @@ export function createStopSession(params: Readonly<{
         (isPidFallback && Number.isFinite(fallbackPid) && pid === fallbackPid);
       if (matches) {
         pidsToStop.push(pid);
-        expectedTrackedSessionsByPid.set(pid, session);
+        expectedByTrackingPid.set(pid, { session, runner: readTrackedSessionRunner(session) });
       }
     }
 
@@ -314,7 +339,7 @@ export function createStopSession(params: Readonly<{
     };
     const retireLegacyAttachmentAfterPositiveDeath = async (
       legacyAttachment: LegacyTerminalAttachmentInfo,
-      options: Readonly<{ runnerExitProven: boolean; trackedPids: readonly number[] }>,
+      options: Readonly<{ runnerExitProven: boolean; exitedRunnerPids: readonly number[] }>,
     ): Promise<StopSessionResult> => {
       const handle = buildLegacyTerminalAttachmentHostHandle(
         legacyAttachment,
@@ -329,7 +354,7 @@ export function createStopSession(params: Readonly<{
           && typeof persistedWindowsPid === 'number'
           && Number.isSafeInteger(persistedWindowsPid)
           && persistedWindowsPid > 0
-          && options.trackedPids.includes(persistedWindowsPid);
+          && options.exitedRunnerPids.includes(persistedWindowsPid);
         if (
           !exactWindowsRunnerExited
           && (legacyAttachment.terminal.mode !== 'plain' || !options.runnerExitProven)
@@ -365,7 +390,7 @@ export function createStopSession(params: Readonly<{
       if (attachmentInfo?.version === 1) {
         return await retireLegacyAttachmentAfterPositiveDeath(attachmentInfo, {
           runnerExitProven: false,
-          trackedPids: [],
+          exitedRunnerPids: [],
         });
       }
       if (!isPidFallback && params.recoverStrandedTerminalControlServiceability) {
@@ -410,22 +435,33 @@ export function createStopSession(params: Readonly<{
         return incompleteStopSession('terminal_host_adapter_unavailable');
       }
     }
-    const runnersAlreadyExited = params.areTrackedRunnersExited
-      ? await params.areTrackedRunnersExited({
+    const isTrackedCandidateCurrent = (trackingPid: number): boolean => {
+      const expected = expectedByTrackingPid.get(trackingPid);
+      const current = pidToTrackedSession.get(trackingPid);
+      return Boolean(expected && current === expected.session && isTrackedSessionRunnerCurrent(current, expected.runner));
+    };
+    const observeRunnersAlreadyExited = async (trackedPids: readonly number[]) => Boolean(
+      params.areTrackedRunnersExited && trackedPids.every(isTrackedCandidateCurrent)
+      && await params.areTrackedRunnersExited({
           sessionId: normalizedSessionId,
-          trackedPids: pidsToStop,
-        }).catch(() => false)
-      : false;
+          trackedPids,
+        }).catch(() => false),
+    );
+    const runnersAlreadyExited = await observeRunnersAlreadyExited(pidsToStop);
     let stoppedAny = false;
     const signaledPids: number[] = runnersAlreadyExited ? [...pidsToStop] : [];
     const confirmedExitedPids: number[] = runnersAlreadyExited ? [...pidsToStop] : [];
     for (const pid of runnersAlreadyExited ? [] : pidsToStop) {
       const session = pidToTrackedSession.get(pid);
-      if (!session) continue;
+      if (!session || !isTrackedCandidateCurrent(pid)) continue;
+      const runner = resolveTrackedSessionRunnerSignalTarget(session);
+      if (!runner) continue;
 
-      if (session.startedBy === 'daemon' && session.childProcess) {
+      if (session.startedBy === 'daemon' && session.childProcess?.pid === runner.pid && runner.pid === pid) {
         if (process.platform === 'win32') {
-          if (await taskkillWindowsDaemonChild({ pid, session, normalizedSessionId, logPidReuseRefusal })) {
+          if (await taskkillWindowsDaemonChild({
+            pid, session, normalizedSessionId, isCurrent: () => isTrackedCandidateCurrent(pid), logPidReuseRefusal, recordKillAudit,
+          })) {
             stoppedAny = true;
             signaledPids.push(pid);
           }
@@ -435,7 +471,7 @@ export function createStopSession(params: Readonly<{
         try {
           try {
             // Prefer killing the full process group when the daemon spawned a detached session runner.
-            recordTerminalHostKillAudit({
+            recordKillAudit({
               actor: 'daemon.stop-session',
               reason: 'stop-session',
               sessionId: normalizedSessionId,
@@ -456,7 +492,7 @@ export function createStopSession(params: Readonly<{
             // fall through
           }
 
-          recordTerminalHostKillAudit({
+          recordKillAudit({
             actor: 'daemon.stop-session',
             reason: 'stop-session',
             sessionId: normalizedSessionId,
@@ -478,43 +514,39 @@ export function createStopSession(params: Readonly<{
 
       // PID reuse safety: verify the PID is still a Happy runner and matches the strongest persisted identity.
       const safe = await isPidSafeHappySessionProcess({
-        pid,
-        expectedProcessCommandHash: session.processCommandHash,
-        expectedProcessInstanceFingerprint: session.processInstanceFingerprint,
+        pid: runner.pid,
+        expectedProcessCommandHash: runner.processCommandHash,
+        expectedProcessInstanceFingerprint: runner.processInstanceFingerprint,
       });
-      if (!safe) {
-        logPidReuseRefusal(`[DAEMON RUN] Refusing to SIGTERM PID ${pid} for session ${normalizedSessionId} (PID reuse safety)`);
+      if (!safe || !isTrackedCandidateCurrent(pid)) {
+        logPidReuseRefusal(`[DAEMON RUN] Refusing to SIGTERM PID ${runner.pid} for session ${normalizedSessionId} (PID reuse safety)`);
         continue;
       }
 
       try {
-        recordTerminalHostKillAudit({
+        recordKillAudit({
           actor: 'daemon.stop-session',
           reason: 'stop-session',
           sessionId: normalizedSessionId,
-          runnerPid: pid,
+          runnerPid: runner.pid,
           zellijName: null,
           signal: 'SIGTERM',
           callSite: 'daemon.sessions.stopSession.pid',
         });
-        process.kill(pid, 'SIGTERM');
+        process.kill(runner.pid, 'SIGTERM');
         session.stopRequestedAtMs = Date.now();
-        logger.debug(`[DAEMON RUN] Sent SIGTERM to external session PID ${pid} (${normalizedSessionId})`);
+        logger.debug(`[DAEMON RUN] Sent SIGTERM to session runner PID ${runner.pid} (${normalizedSessionId})`);
         stoppedAny = true;
         signaledPids.push(pid);
       } catch (error) {
-        logger.debug(`[DAEMON RUN] Failed to kill external session PID ${pid}:`, error);
+        logger.debug(`[DAEMON RUN] Failed to kill session runner PID ${runner.pid}:`, error);
       }
     }
 
     const unsignaledPids = pidsToStop.filter((pid) => !signaledPids.includes(pid));
     if (
       unsignaledPids.length > 0
-      && params.areTrackedRunnersExited
-      && await params.areTrackedRunnersExited({
-        sessionId: normalizedSessionId,
-        trackedPids: unsignaledPids,
-      }).catch(() => false)
+      && await observeRunnersAlreadyExited(unsignaledPids)
     ) {
       confirmedExitedPids.push(...unsignaledPids);
     }
@@ -543,24 +575,20 @@ export function createStopSession(params: Readonly<{
       let forceSignaledAny = false;
       const exitedBeforeForcePids = new Set<number>();
       for (const pid of pidsToStop) {
-        if (
-          params.areTrackedRunnersExited
-          && await params.areTrackedRunnersExited({
-            sessionId: normalizedSessionId,
-            trackedPids: [pid],
-          }).catch(() => false)
-        ) {
+        if (await observeRunnersAlreadyExited([pid])) {
           exitedBeforeForcePids.add(pid);
           continue;
         }
-        const expectedSession = expectedTrackedSessionsByPid.get(pid);
-        if (!expectedSession) continue;
+        const expected = expectedByTrackingPid.get(pid);
+        if (!expected) continue;
         forceSignaledAny = await forceKillTrackedRunner({
-          pid,
-          expectedSession,
+          trackingPid: pid,
+          expectedSession: expected.session,
+          expectedRunner: expected.runner,
           pidToTrackedSession,
           normalizedSessionId,
           logPidReuseRefusal,
+          recordKillAudit,
         }) || forceSignaledAny;
       }
 
@@ -574,10 +602,7 @@ export function createStopSession(params: Readonly<{
       } else if (params.areTrackedRunnersExited) {
         // Identity inspection may await OS discovery while the runner exits. Refusal to
         // signal remains fail-closed, but it is not a physical liveness observation.
-        runnersExited = await params.areTrackedRunnersExited({
-          sessionId: normalizedSessionId,
-          trackedPids: pidsToStop,
-        }).catch(() => false);
+        runnersExited = await observeRunnersAlreadyExited(pidsToStop);
       }
       if (!runnersExited) {
         logWarning(
@@ -585,6 +610,17 @@ export function createStopSession(params: Readonly<{
         );
         return incompleteStopSession('runner_exit_timeout');
       }
+    }
+
+    // A reported runner can be promoted to its own tracking key while Stop is waiting.
+    // A newly tracked or promoted runner needs its own positive exit observation before host retirement.
+    if ([...pidToTrackedSession].some(([pid, session]) =>
+      !isTrackedCandidateCurrent(pid)
+      && (session.happySessionId === normalizedSessionId
+        || session.spawnOptions?.existingSessionId === normalizedSessionId
+        || pidsToStop.some((trackingPid) => expectedByTrackingPid.get(trackingPid)?.runner.pid === pid)),
+    )) {
+      return incompleteStopSession('runner_signal_incomplete');
     }
 
     logger.infoFile('[DAEMON STOP] Runner exit proven', {
@@ -694,7 +730,7 @@ export function createStopSession(params: Readonly<{
     if (attachmentInfo?.version === 1) {
       return await retireLegacyAttachmentAfterPositiveDeath(attachmentInfo, {
         runnerExitProven: true,
-        trackedPids: pidsToStop,
+        exitedRunnerPids: Array.from(expectedByTrackingPid.values(), ({ runner }) => runner.pid),
       });
     }
     return { status: 'stopped' };

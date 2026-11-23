@@ -28,6 +28,11 @@ import { parseSerializedSessionDraftScope, serializeSessionDraftReplica, session
 
 export type SessionDraftRepositoryScope = ServerAccountScope;
 export type SessionDraftStatus = 'clean' | 'pending' | 'offline' | 'conflict' | 'error';
+/**
+ * Why a draft projects `error`: `storage` when this device could not persist the scope's drafts,
+ * `encryption` when the draft could not be sealed for sync or the synced copy could not be opened.
+ */
+export type SessionDraftErrorReason = 'storage' | 'encryption';
 export type SessionDraftMaterializationIntent = 'passiveHydration' | 'userEdit' | 'seeded' | 'launchInterrupted';
 
 type DraftFieldMutationV1 = Readonly<{
@@ -304,14 +309,24 @@ function isNonEmptyArray(value: StrictJsonValue): boolean {
     return Array.isArray(value) && value.length > 0;
 }
 
-function hasMeaningfulContent(document: SessionDraftDocumentV1): boolean {
+function hasComposerOrExtensionContent(document: SessionDraftDocumentV1): boolean {
     if (document.composer.text.value.trim().length > 0) return true;
     if (isNonEmptyArray(document.composer.mentions.value) || isNonEmptyArray(document.composer.attachments.value)) return true;
-    if (Object.keys(document.extensions).some((pluginId) => Object.keys(document.extensions[pluginId] ?? {}).length > 0)) return true;
+    return Object.keys(document.extensions).some((pluginId) => Object.keys(document.extensions[pluginId] ?? {}).length > 0);
+}
+
+function hasMeaningfulContent(document: SessionDraftDocumentV1): boolean {
+    if (hasComposerOrExtensionContent(document)) return true;
     if (document.target.kind === 'newSession') return Object.keys(document.target.authoring).length > 0;
     return isMeaningfulSessionDraftRecipientValueV1(document.target.routing.recipient.value)
         || document.target.routing.agentContinuation.value !== null
         || document.target.routing.executionRunDelivery.value !== null;
+}
+
+/** Content the person wrote, as opposed to launch configuration that resolves on its own. */
+function hasNewSessionAuthoredContent(document: SessionDraftDocumentV1): boolean {
+    if (hasComposerOrExtensionContent(document)) return true;
+    return document.target.kind === 'newSession' && (document.target.authoring.automation?.value ?? null) !== null;
 }
 
 function createEmptyDocument(address: SessionDraftAddressV1, randomUUID: () => string): SessionDraftDocumentV1 {
@@ -573,6 +588,11 @@ export class SessionDraftRepository {
         return this.getScopeState(scope).persistenceError ? 'error' : replica.status;
     }
 
+    getSessionDraftErrorReason(scope: SessionDraftRepositoryScope, address: SessionDraftAddressV1): SessionDraftErrorReason | null {
+        if (this.getScopeState(scope).persistenceError) return 'storage';
+        return this.readReplica(scope, address)?.status === 'error' ? 'encryption' : null;
+    }
+
     private notify(scope: SessionDraftRepositoryScope, address: SessionDraftAddressV1): void {
         this.notifyBatch(scope, [address]);
     }
@@ -757,7 +777,11 @@ export class SessionDraftRepository {
         const materialized = existing?.materialized === true
             || materializationIntent === 'seeded'
             || materializationIntent === 'launchInterrupted'
-            || (materializationIntent === 'userEdit' && (changed || hasMeaningfulContent(document)));
+            || (materializationIntent === 'userEdit' && (address.kind === 'newSession'
+                // Opening the composer autosaves resolved configuration (machine, profile,
+                // agent) as it settles; only authored content turns a New Session into a kept draft.
+                ? hasNewSessionAuthoredContent(document)
+                : changed || hasMeaningfulContent(document)));
         if (!materialized && address.kind === 'newSession') return;
         const meaningfulContent = hasMeaningfulContent(document);
         this.writeReplica(scope, {
@@ -1592,6 +1616,7 @@ export function configureSessionDraftRepository(options: Readonly<{
 }
 
 export const getSessionDraftSnapshot = singleton.getSessionDraftSnapshot.bind(singleton);
+export const getSessionDraftErrorReason = singleton.getSessionDraftErrorReason.bind(singleton);
 export const readOrdinaryEntryDraftId = singleton.readOrdinaryEntryDraftId.bind(singleton);
 export const setOrdinaryEntryDraftId = singleton.setOrdinaryEntryDraftId.bind(singleton);
 export const clearOrdinaryEntryDraftIdExact = singleton.clearOrdinaryEntryDraftIdExact.bind(singleton);

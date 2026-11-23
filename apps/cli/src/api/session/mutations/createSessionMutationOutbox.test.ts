@@ -143,6 +143,126 @@ function createObservationSocket(options: Readonly<{
 }
 
 describe('createSessionMutationOutbox', () => {
+    it.each([
+        { details: { providerObservedAtMs: 1_000 }, path: 'issue.usageLimit', code: 'unrecognized_keys', retained: true, expectedDetails: {} },
+        { details: { connectedService: { serviceId: 'claude-subscription' as const, profileId: 'profile-1', groupId: 'group-1', extra: true } }, path: 'issue.usageLimit.connectedService', code: 'unrecognized_keys', retained: true, expectedDetails: {} },
+        { details: { utilization: 101 }, path: 'issue.usageLimit.utilization', code: 'too_big', retained: true, expectedDetails: {} },
+        { details: { allWindows: [{ meterId: 'seven_day', remainingPct: 101, resetAtMs: 2_000 }] }, path: 'issue.usageLimit.allWindows.0.remainingPct', code: 'too_big', retained: true, expectedDetails: { allWindows: [{ meterId: 'seven_day', resetAtMs: 2_000 }] } },
+        { details: { resetAtMs: Number.NaN }, path: 'issue.usageLimit.resetAtMs', code: 'invalid_type', retained: false, expectedDetails: {} },
+    ])('delivers a failed turn preserving valid issue details after $path ($code)', async ({ details, path, code, retained, expectedDetails }) => {
+        const { createSessionMutationOutbox } = await import('./createSessionMutationOutbox');
+        const { createSessionTurnMutation } = await import('./sessionMutationTypes');
+        const { logger } = await import('@/ui/logger');
+        const warnFile = vi.spyOn(logger, 'warnFile').mockImplementation(() => {});
+        const issue = {
+            v: 1 as const, scope: 'primary_session' as const, status: 'failed' as const,
+            code: 'usage_limit', source: 'usage_limit' as const, occurredAt: 1_000,
+            provider: 'claude', sanitizedPreview: 'Weekly usage limit reached',
+            temporaryThrottle: { v: 1 as const, retryAfterMs: 500, recoverability: 'retry' as const },
+            usageLimit: {
+                v: 1 as const, resetAtMs: 2_000, retryAfterMs: null,
+                quotaScope: 'account' as const, recoverability: 'switch_account' as const,
+                providerLimitId: 'seven_day',
+                connectedService: { serviceId: 'claude-subscription' as const, profileId: 'profile-1', groupId: 'group-1' },
+                ...details,
+            },
+        };
+        const delivered: unknown[] = [];
+        const socket = createApiSessionSocketStub({
+            connected: true,
+            emitWithAck: async (_event, payload) => {
+                delivered.push(payload);
+                return { ok: true };
+            },
+        });
+        const outbox = createSessionMutationOutbox({
+            token: 'tok', sessionId: 's-invalid-optional-issue',
+            getSocket: () => socket, requestReconnect: () => {},
+        });
+        try {
+            await outbox.enqueueSessionTurn(createSessionTurnMutation({
+                sessionId: 's-invalid-optional-issue', action: 'fail', turnId: 'turn-1',
+                mutationId: 'failure-1', observedAt: 1_000, issue,
+            }));
+            expect(delivered).toEqual([expect.objectContaining({
+                action: 'fail', turnId: 'turn-1',
+                issue: expect.objectContaining({
+                    code: 'usage_limit', source: 'usage_limit',
+                    sanitizedPreview: 'Weekly usage limit reached',
+                    temporaryThrottle: issue.temporaryThrottle,
+                }),
+            })]);
+            if (retained) {
+                expect(delivered[0]).toHaveProperty('issue.usageLimit', {
+                    v: 1, resetAtMs: 2_000, retryAfterMs: null,
+                    quotaScope: 'account', recoverability: 'switch_account', providerLimitId: 'seven_day',
+                    connectedService: { serviceId: 'claude-subscription', profileId: 'profile-1', groupId: 'group-1' },
+                    ...expectedDetails,
+                });
+            } else {
+                expect(delivered[0]).not.toHaveProperty('issue.usageLimit');
+            }
+            expect(issue.usageLimit).toMatchObject(details);
+            await expect(readDeadLetterEntries('s-invalid-optional-issue')).resolves.toEqual([]);
+            expect(warnFile).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+                mutationId: 'failure-1',
+                issues: [{ code, path }],
+            }));
+        } finally {
+            await outbox.close();
+            warnFile.mockRestore();
+        }
+    });
+
+    it('does not requeue historical invalid-issue failed turns from recovery custody on startup', async () => {
+        const sessionId = 's-historical-invalid-issue';
+        const payload = {
+            v: 1, sessionId, mutationId: 'historical-failure', action: 'fail',
+            turnId: 'turn-1', observedAt: 1_000,
+            issue: {
+                v: 1, scope: 'primary_session', status: 'failed',
+                code: 'usage_limit', source: 'usage_limit', occurredAt: 1_000,
+                usageLimit: {
+                    v: 1, resetAtMs: 2_000, retryAfterMs: null, quotaScope: 'account',
+                    recoverability: 'switch_account', providerLimitId: 'seven_day',
+                    providerObservedAtMs: 1_000,
+                    connectedService: { serviceId: 'claude-subscription', profileId: 'profile-1', groupId: 'group-1' },
+                },
+            },
+        };
+        await writeDeadLetterEntries(sessionId, [payload, {
+            ...payload, mutationId: 'malformed-core', observedAt: 'invalid',
+        }].map((recoveryPayload) => ({
+            v: 1, kind: 'session_turn', sessionId, mutationId: recoveryPayload.mutationId,
+            reason: 'invalid_session_turn_payload', attempts: 0, createdAt: 1_000, deadLetteredAt: 1_100,
+            diagnostic: { issues: [{ code: 'unrecognized_keys', path: 'issue.usageLimit' }] },
+            payloadSummary: {
+                action: 'fail', sessionId, mutationId: recoveryPayload.mutationId, turnId: 'turn-1',
+            },
+            recoveryPayload,
+        })));
+        const { createSessionMutationOutbox } = await import('./createSessionMutationOutbox');
+        const delivered: unknown[] = [];
+        const socket = createApiSessionSocketStub({ connected: true, emitWithAck: async (_event, mutation) => {
+            delivered.push(mutation);
+            return { ok: true };
+        } });
+        const outbox = createSessionMutationOutbox({ token: 'tok', sessionId, getSocket: () => socket, requestReconnect: () => {} });
+        try {
+            await outbox.awaitReady();
+            await outbox.flush('connect');
+            await outbox.flush('connect');
+            expect(delivered).toEqual([]);
+            await expect(readPersistedOutboxMutations(sessionId)).resolves.toEqual([]);
+            const deadLetters = await readDeadLetterEntries(sessionId);
+            expect(deadLetters[0]).not.toHaveProperty('recoveryAttemptedAt');
+            expect(deadLetters[0]).toHaveProperty('recoveryPayload.issue.usageLimit.providerObservedAtMs', 1_000);
+            expect(deadLetters[1]).not.toHaveProperty('recoveryAttemptedAt');
+        } finally {
+            await outbox.close();
+        }
+    });
+
     it('preserves an unread journal through failed startup, enqueue and close, then replays it on restart', async () => {
         const { createSessionMutationOutbox } = await import('./createSessionMutationOutbox');
         const { createTranscriptMessageAppendMutation } = await import('./sessionMutationTypes');
@@ -1387,6 +1507,81 @@ describe('createSessionMutationOutbox', () => {
         }
     });
 
+    it('waits for a blocked head mutation backoff instead of re-arming the retry timer at 0 ms', async () => {
+        // Never-attempted mutations queued behind a retryably failing head keep nextAttemptAt 0.
+        // The retry timer must wake for the head's backoff, not for mutations the next flush
+        // cannot attempt; a 0 ms timer re-runs flush continuously while the head backs off.
+        process.env.HAPPIER_SESSION_MUTATION_OUTBOX_BASE_RETRY_MS = '1000';
+        process.env.HAPPIER_SESSION_MUTATION_OUTBOX_JITTER_MS = '0';
+        vi.mocked(axios.post).mockRejectedValue({ response: { status: 503 } });
+        const socket = createApiSessionSocketStub({ connected: false });
+        const { createSessionMutationOutbox } = await import('./createSessionMutationOutbox');
+        const { createSessionTurnMutation } = await import('./sessionMutationTypes');
+        const { saveSessionMutationOutbox } = await import('./sessionMutationPersistence');
+        const sessionId = 's-blocked-head-retry-delay';
+        const head = createSessionTurnMutation({
+            sessionId,
+            action: 'begin',
+            turnId: 'turn-head',
+            provider: 'claude',
+            mutationId: 'mutation-head-begin',
+            observedAt: 1_000,
+        });
+        const behind = createSessionTurnMutation({
+            sessionId,
+            action: 'complete',
+            turnId: 'turn-head',
+            provider: 'claude',
+            mutationId: 'mutation-behind-complete',
+            observedAt: 1_100,
+        });
+        await saveSessionMutationOutbox(await createRuntimePersistenceContext(sessionId), [
+            {
+                kind: 'session_turn',
+                mutationId: head.mutationId,
+                payload: head,
+                createdAt: 1_000,
+                attempts: 0,
+                nextAttemptAt: 0,
+            },
+            {
+                kind: 'session_turn',
+                mutationId: behind.mutationId,
+                payload: behind,
+                createdAt: 1_100,
+                attempts: 0,
+                nextAttemptAt: 0,
+            },
+        ]);
+        const outbox = createSessionMutationOutbox({
+            token: 'tok',
+            sessionId,
+            getSocket: () => socket,
+            requestReconnect: () => {},
+        });
+        // The retry timer is the outbox's only timer; the clock is a system boundary.
+        const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+        try {
+            await outbox.flush('flush');
+
+            const scheduledDelays = setTimeoutSpy.mock.calls.map(([, delay]) => delay ?? 0);
+            expect(scheduledDelays).not.toEqual([]);
+            // The automatic startup flush may also attempt the head, so it has failed at least
+            // once: its backoff is at least 1000 * 2^1 with no jitter, never 0.
+            expect(Math.min(...scheduledDelays)).toBeGreaterThan(1_000);
+            const persisted = await readPersistedOutboxMutations(sessionId);
+            expect(persisted).toEqual([
+                expect.objectContaining({ mutationId: head.mutationId }),
+                expect.objectContaining({ mutationId: behind.mutationId, attempts: 0, nextAttemptAt: 0 }),
+            ]);
+            expect((persisted[0] as { attempts: number }).attempts).toBeGreaterThanOrEqual(1);
+        } finally {
+            setTimeoutSpy.mockRestore();
+            await outbox.close();
+        }
+    });
+
     it('delivers a runtime-activity terminal snapshot even when an earlier session turn is retryably blocked', async () => {
         const sessionId = 's-runtime-activity-not-blocked-by-turn';
         const deliveredSnapshots: unknown[] = [];
@@ -1473,6 +1668,86 @@ describe('createSessionMutationOutbox', () => {
             }),
         ]);
         await outbox.close();
+    });
+
+    it('automatically retries Activity before an earlier blocked ordered head is due', async () => {
+        vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+        vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+        const sessionId = 's-independent-activity-retry';
+        const deliveredSnapshots: unknown[] = [];
+        let activityAttempts = 0;
+        vi.mocked(axios.post).mockRejectedValue({ response: { status: 503 } });
+        const { createSessionMutationJournal } = await import('./createSessionMutationOutbox');
+        const { createRuntimeActivitySnapshotMutation, createSessionTurnMutation } = await import('./sessionMutationTypes');
+        const { parseQueuedSessionMutation } = await import('./sessionMutationPersistence');
+        const outbox = createSessionMutationJournal({
+            custody: 'runtime',
+            token: 'tok',
+            sessionId,
+            paths: (await createRuntimePersistenceContext(sessionId)).paths,
+            admission: parseQueuedSessionMutation,
+            getSocket: () => createApiSessionSocketStub({ connected: false }),
+            requestReconnect: () => {},
+            deliverRuntimeActivitySnapshot: async (mutation) => {
+                activityAttempts += 1;
+                if (activityAttempts === 2) return { status: 'retryable', reason: 'temporarily_unavailable' };
+                deliveredSnapshots.push(mutation.snapshot);
+                return {
+                    status: 'delivered',
+                    path: 'socket',
+                    runtimeActivityEvidence: {
+                        disposition: 'applied',
+                        projection: { ...mutation.snapshot, observedAt: Date.now(), revision: activityAttempts },
+                    },
+                };
+            },
+        });
+        try {
+            await outbox.setSessionSyncPendingInputServerContract(serverContract('session_sync_v2_pending_input_v1'));
+            // Settle the initial snapshot so later Activity is appended behind the ordered queue.
+            await outbox.enqueueRuntimeActivitySnapshot(createRuntimeActivitySnapshotMutation({
+                sessionId, snapshot: { state: 'active', activeCount: 1 },
+            }));
+            const head = createSessionTurnMutation({
+                sessionId, action: 'begin', turnId: 'turn-head', mutationId: 'head', observedAt: Date.now(),
+            });
+            const tail = createSessionTurnMutation({
+                sessionId, action: 'complete', turnId: 'turn-head', mutationId: 'tail', observedAt: Date.now(),
+            });
+            await outbox.enqueueSessionTurn(head);
+            await outbox.enqueueSessionTurn(tail);
+            await outbox.flush('timer');
+            // The head already has the normal 30-second capped backoff. Give Activity
+            // a shorter retry without changing the deadline persisted for that head.
+            process.env.HAPPIER_SESSION_MUTATION_OUTBOX_BASE_RETRY_MS = '1000';
+            const terminal = createRuntimeActivitySnapshotMutation({
+                sessionId, snapshot: { state: 'idle', activeCount: 0 },
+            });
+            await outbox.enqueueRuntimeActivitySnapshot(terminal);
+            expect(await readPersistedOutboxMutations(sessionId)).toEqual([
+                expect.objectContaining({ mutationId: head.mutationId, nextAttemptAt: Date.now() + 30_000 }),
+                expect.objectContaining({ mutationId: tail.mutationId, attempts: 0, nextAttemptAt: 0 }),
+                expect.objectContaining({ mutationId: terminal.mutationId, nextAttemptAt: Date.now() + 2_000 }),
+            ]);
+            const headAttempts = vi.mocked(axios.post).mock.calls.length;
+
+            await vi.advanceTimersByTimeAsync(2_000);
+
+            // Only the scheduled timer may trigger delivery; do not explicitly flush.
+            await vi.waitFor(async () => {
+                expect(deliveredSnapshots).toEqual([
+                    { state: 'active', activeCount: 1 }, { state: 'idle', activeCount: 0 },
+                ]);
+                expect(await readPersistedOutboxMutations(sessionId)).toEqual([
+                    expect.objectContaining({ mutationId: head.mutationId }),
+                    expect.objectContaining({ mutationId: tail.mutationId, attempts: 0, nextAttemptAt: 0 }),
+                ]);
+            });
+            expect(vi.mocked(axios.post).mock.calls.length).toBe(headAttempts);
+        } finally {
+            await outbox.close();
+            vi.useRealTimers();
+        }
     });
 
     it('re-resolves the live server URL and retries a terminal turn mutation after a local endpoint refusal', async () => {

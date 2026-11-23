@@ -62,7 +62,7 @@ interface AskUserQuestionInput {
     happierDialog?: unknown;
 }
 
-type SubmissionFailureGuidance = 'update' | 'reconnect' | 'retry';
+type SubmissionFailureGuidance = 'update' | 'reconnect' | 'retry' | 'unconfirmed';
 
 function resolveSubmissionFailureGuidance(error: unknown): SubmissionFailureGuidance | null {
     switch (readRpcErrorCode(error)) {
@@ -71,6 +71,8 @@ function resolveSubmissionFailureGuidance(error: unknown): SubmissionFailureGuid
             return 'update';
         case PUBLIC_RPC_HANDLER_ERROR_CODES.STRUCTURED_QUESTION_RECEIVER_NOT_OWNER:
             return 'reconnect';
+        case PUBLIC_RPC_HANDLER_ERROR_CODES.STRUCTURED_QUESTION_SUBMISSION_UNCONFIRMED:
+            return 'unconfirmed';
         case PUBLIC_RPC_HANDLER_ERROR_CODES.STRUCTURED_QUESTION_INVALID:
         case PUBLIC_RPC_HANDLER_ERROR_CODES.STRUCTURED_QUESTION_LEGACY_INVALID:
         case PUBLIC_RPC_HANDLER_ERROR_CODES.STRUCTURED_QUESTION_LEGACY_AMBIGUOUS:
@@ -250,9 +252,12 @@ const styles = StyleSheet.create((theme) => ({
     },
     actionsContainer: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         gap: 12,
         marginTop: 8,
-        justifyContent: 'flex-end',
+    },
+    submitButtonTrailing: {
+        marginLeft: 'auto',
     },
     submitButton: {
         backgroundColor: theme.colors.button.primary.background,
@@ -764,40 +769,43 @@ export const AskUserQuestionView = React.memo<ToolViewProps>(({ tool, sessionId,
                 ) : null}
 
                 {(canInteract || isSubmitting) && (
-                    <View style={styles.actionsContainer}>
+                    <>
                         {requiresCliUpdate ? (
                             <Text style={styles.optionDescription}>{t('deps.ui.notAvailableUpdateCli')}</Text>
                         ) : null}
-                        <TouchableOpacity
-                            testID="ask-user-question.submit"
-                            accessibilityRole="button"
-                            accessibilityLabel={t('tools.askUserQuestion.submit')}
-                            style={[
-                                styles.submitButton,
-                                (!canSubmit || isSubmitting) && styles.submitButtonDisabled,
-                            ]}
-                            onPress={handleSubmit}
-                            disabled={!canSubmit || isSubmitting}
-                            activeOpacity={0.7}
-                        >
-                            {isSubmitting ? (
-                                <ActivitySpinner size="small" color={theme.colors.button.primary.tint} />
-                            ) : (
-                                <Text style={styles.submitButtonText}>{t('tools.askUserQuestion.submit')}</Text>
-                            )}
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            testID="ask-user-question.dismiss"
-                            accessibilityRole="button"
-                            accessibilityLabel={t('tools.askUserQuestion.dismiss')}
-                            style={[styles.optionButton, isSubmitting && styles.optionButtonDisabled]}
-                            onPress={handleDismiss}
-                            disabled={isSubmitting}
-                            activeOpacity={0.7}
-                        >
-                            <Text style={styles.optionLabel}>{t('tools.askUserQuestion.dismiss')}</Text>
-                        </TouchableOpacity>
-                    </View>
+                        <View style={styles.actionsContainer}>
+                            <TouchableOpacity
+                                testID="ask-user-question.dismiss"
+                                accessibilityRole="button"
+                                accessibilityLabel={t('tools.askUserQuestion.dismiss')}
+                                style={[styles.optionButton, isSubmitting && styles.optionButtonDisabled]}
+                                onPress={handleDismiss}
+                                disabled={isSubmitting}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={styles.optionLabel}>{t('tools.askUserQuestion.dismiss')}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                testID="ask-user-question.submit"
+                                accessibilityRole="button"
+                                accessibilityLabel={t('tools.askUserQuestion.submit')}
+                                style={[
+                                    styles.submitButton,
+                                    styles.submitButtonTrailing,
+                                    (!canSubmit || isSubmitting) && styles.submitButtonDisabled,
+                                ]}
+                                onPress={handleSubmit}
+                                disabled={!canSubmit || isSubmitting}
+                                activeOpacity={0.7}
+                            >
+                                {isSubmitting ? (
+                                    <ActivitySpinner size="small" color={theme.colors.button.primary.tint} />
+                                ) : (
+                                    <Text style={styles.submitButtonText}>{t('tools.askUserQuestion.submit')}</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </>
                 )}
             </View>
         </ToolSectionView>

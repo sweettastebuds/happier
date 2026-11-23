@@ -162,6 +162,31 @@ function restoreProcessEnvValue(name: string, value: string | undefined): void {
   }
 }
 
+async function setAccountSettingsSnapshot(snapshot: Readonly<{
+  settingsVersion: number;
+  settings?: unknown;
+  settingsSecretsReadKeys?: readonly Uint8Array[];
+  scopeKey?: string;
+}> | null): Promise<void> {
+  const {
+    setActiveAccountSettingsSnapshot,
+    resetActiveAccountSettingsSnapshotForTests,
+  } = await import('@/settings/accountSettings/activeAccountSettingsSnapshot');
+  if (snapshot === null) {
+    resetActiveAccountSettingsSnapshotForTests();
+    return;
+  }
+  const { accountSettingsParse } = await import('@happier-dev/protocol');
+  setActiveAccountSettingsSnapshot({
+    source: 'cache',
+    settings: accountSettingsParse(snapshot.settings),
+    settingsVersion: snapshot.settingsVersion,
+    loadedAtMs: Date.now(),
+    settingsSecretsReadKeys: snapshot.settingsSecretsReadKeys ?? [],
+    ...(snapshot.scopeKey ? { scopeKey: snapshot.scopeKey } : {}),
+  });
+}
+
 async function resetAutomationDaemonTestDefaults(): Promise<void> {
   const socketIo = await import('socket.io-client');
   const actualSocketIo = await vi.importActual<typeof socketIo>('socket.io-client');
@@ -206,7 +231,6 @@ const harness = vi.hoisted(() => {
   let requestShutdownRef: ((source: ShutdownSource, errorMessage?: string) => void) | null = null;
   let machineConnectionStateListener: ((state: any) => void) | null = null;
   let autoShutdownAfterAutomationStart = true;
-  let activeAccountSettingsSnapshot: Record<string, unknown> | null = null;
   let daemonControlServerParams: unknown = null;
   let machineSyncClientOverride: unknown = null;
   const machineUpdateListeners: Array<(update: any) => boolean | void> = [];
@@ -360,10 +384,6 @@ const harness = vi.hoisted(() => {
     setAutoShutdownAfterAutomationStart: (value: boolean) => {
       autoShutdownAfterAutomationStart = value;
     },
-    setActiveAccountSettingsSnapshot: (snapshot: Record<string, unknown> | null) => {
-      activeAccountSettingsSnapshot = snapshot;
-    },
-    getActiveAccountSettingsSnapshot: () => activeAccountSettingsSnapshot,
     setDaemonControlServerParams: (params: unknown) => {
       daemonControlServerParams = params;
     },
@@ -408,12 +428,10 @@ vi.mock('@/api/api', () => ({
   isMachineContentPublicKeyMismatchError: vi.fn(() => false),
 }));
 
-vi.mock('axios', () => ({
-  default: {
-    get: harness.axiosGet,
-    isAxiosError: (error: unknown) => Boolean((error as { isAxiosError?: unknown } | null)?.isAxiosError),
-  },
-}));
+vi.mock('axios', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('axios')>();
+  return { ...actual, default: { ...actual.default, get: harness.axiosGet } };
+});
 
 vi.mock('@/api/accountProfile', () => ({
   fetchAccountProfile: vi.fn(async () => ({
@@ -581,17 +599,15 @@ vi.mock('@/persistence', async (importOriginal) => {
   };
 });
 
-vi.mock('@/settings/accountSettings/activeAccountSettingsSnapshot', () => ({
-  getActiveAccountSettingsSnapshot: vi.fn(() => harness.getActiveAccountSettingsSnapshot()),
-}));
-
-vi.mock('@/settings/accountSettings/bootstrapAccountSettingsContext', () => ({
+vi.mock('@/settings/accountSettings/bootstrapAccountSettingsContext', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/settings/accountSettings/bootstrapAccountSettingsContext')>(),
   bootstrapAccountSettingsContext: harness.bootstrapAccountSettingsContext,
 }));
 
 vi.mock('@/settings/accountSettings/refreshAccountSettingsForMinimumVersion', () => ({
   refreshAccountSettingsForMinimumVersion: vi.fn(async (params: { credentials: unknown; minSettingsVersion?: number | null; mode?: string; forceRefresh?: boolean }) => {
-    const active = harness.getActiveAccountSettingsSnapshot();
+    const { getActiveAccountSettingsSnapshot } = await import('@/settings/accountSettings/activeAccountSettingsSnapshot');
+    const active = getActiveAccountSettingsSnapshot();
     if (
       !params.forceRefresh
       &&
@@ -887,7 +903,7 @@ const CLAUDE_CONNECTED_BINDINGS = {
   },
 } as const;
 
-function sharedClaudeAccountSettingsSnapshot(): Record<string, unknown> {
+function sharedClaudeAccountSettingsSnapshot() {
   return {
     settingsVersion: 3,
     settings: {
@@ -1103,7 +1119,7 @@ describe('startDaemon automation wiring (integration)', () => {
     vi.resetModules();
     vi.clearAllMocks();
     harness.setAutoShutdownAfterAutomationStart(true);
-    harness.setActiveAccountSettingsSnapshot(null);
+    await setAccountSettingsSnapshot(null);
     harness.resetDaemonListeners();
     await resetAutomationDaemonTestDefaults();
   });
@@ -1245,7 +1261,7 @@ describe('startDaemon automation wiring (integration)', () => {
   it('fails closed before child launch when connected-service resume reachability is unavailable', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     harness.setAutoShutdownAfterAutomationStart(false);
-    harness.setActiveAccountSettingsSnapshot(sharedClaudeAccountSettingsSnapshot());
+    await setAccountSettingsSnapshot(sharedClaudeAccountSettingsSnapshot());
 
     try {
       const {
@@ -1306,7 +1322,7 @@ describe('startDaemon automation wiring (integration)', () => {
   it('continues to child launch when connected-service resume reachability resolves', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     harness.setAutoShutdownAfterAutomationStart(false);
-    harness.setActiveAccountSettingsSnapshot(sharedClaudeAccountSettingsSnapshot());
+    await setAccountSettingsSnapshot(sharedClaudeAccountSettingsSnapshot());
 
     try {
       const { resolveConnectedServiceAuthForSpawn } = await import('./connectedServices/resolveConnectedServiceAuthForSpawn');
@@ -1361,7 +1377,7 @@ describe('startDaemon automation wiring (integration)', () => {
   it('gates runtime-snapshot replayed vendor resume ids before child launch', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     harness.setAutoShutdownAfterAutomationStart(false);
-    harness.setActiveAccountSettingsSnapshot(sharedClaudeAccountSettingsSnapshot());
+    await setAccountSettingsSnapshot(sharedClaudeAccountSettingsSnapshot());
 
     try {
       const {
@@ -1922,10 +1938,12 @@ describe('startDaemon automation wiring (integration)', () => {
       expect(harness.apiMachine.recoverDaemonTerminalSessionMutationJournals).toHaveBeenCalledOnce();
       expect(harness.apiMachine.recoverDaemonTerminalSessionMutationJournals.mock.invocationCallOrder[0])
         .toBeLessThan(harness.apiMachine.connect.mock.invocationCallOrder[0]!);
-      expect(harness.apiMachine.onConnectedServicesProjectionChange).toHaveBeenCalledOnce();
-      expect(harness.apiMachine.onConnectedServicesProjectionChange.mock.invocationCallOrder[0])
-        .toBeLessThan(harness.apiMachine.connect.mock.invocationCallOrder[0]!);
-      expect(harness.connectedServicesProjectionChangeListeners).toHaveLength(1);
+      // Generation reconciliation and provider settings must both subscribe before connect.
+      expect(harness.apiMachine.onConnectedServicesProjectionChange).toHaveBeenCalledTimes(2);
+      for (const order of harness.apiMachine.onConnectedServicesProjectionChange.mock.invocationCallOrder) {
+        expect(order).toBeLessThan(harness.apiMachine.connect.mock.invocationCallOrder[0]!);
+      }
+      expect(harness.connectedServicesProjectionChangeListeners).toHaveLength(2);
       const { fetchSessionsPage } = await import('@/session/transport/http/sessionsHttp');
       vi.mocked(fetchSessionsPage).mockClear();
       const projectionController = new AbortController();
@@ -2163,7 +2181,7 @@ describe('startDaemon automation wiring (integration)', () => {
       const { startDaemon } = await import('./startDaemon');
       run = startDaemon();
       await waitForCondition(
-        () => harness.connectedServicesProjectionChangeListeners.length === 1
+        () => harness.connectedServicesProjectionChangeListeners.length === 2
           && harness.getDaemonControlServerParams() !== null,
         'Expected canonical consumer and projection listener composition',
       );
@@ -2242,7 +2260,7 @@ describe('startDaemon automation wiring (integration)', () => {
     let run: Promise<void> | null = null;
     let app: Awaited<ReturnType<typeof createCapturedDaemonControlApp>> | null = null;
     harness.setAutoShutdownAfterAutomationStart(false);
-    harness.setActiveAccountSettingsSnapshot(sharedClaudeAccountSettingsSnapshot());
+    await setAccountSettingsSnapshot(sharedClaudeAccountSettingsSnapshot());
 
     try {
       const webhook = await installActualDaemonClaudeReadinessWebhook(newcomerPid);
@@ -2315,7 +2333,7 @@ describe('startDaemon automation wiring (integration)', () => {
       const { startDaemon } = await import('./startDaemon');
       run = startDaemon();
       await waitForCondition(
-        () => harness.connectedServicesProjectionChangeListeners.length === 1
+        () => harness.connectedServicesProjectionChangeListeners.length === 2
           && harness.getDaemonControlServerParams() !== null,
         'Expected canonical generation and control-server composition',
       );
@@ -2413,7 +2431,7 @@ describe('startDaemon automation wiring (integration)', () => {
     const previousActiveServerDir = configuration.activeServerDir;
     Object.assign(configuration, { activeServerDir });
     harness.setAutoShutdownAfterAutomationStart(false);
-    harness.setActiveAccountSettingsSnapshot(sharedClaudeAccountSettingsSnapshot());
+    await setAccountSettingsSnapshot(sharedClaudeAccountSettingsSnapshot());
 
     try {
       const webhook = await installActualDaemonClaudeReadinessWebhook(pid);
@@ -2495,7 +2513,7 @@ describe('startDaemon automation wiring (integration)', () => {
       const { startDaemon } = await import('./startDaemon');
       run = startDaemon();
       await waitForCondition(
-        () => harness.connectedServicesProjectionChangeListeners.length === 1
+        () => harness.connectedServicesProjectionChangeListeners.length === 2
           && harness.getDaemonControlServerParams() !== null,
         'Expected canonical generation and control-server composition',
       );
@@ -2613,7 +2631,7 @@ describe('startDaemon automation wiring (integration)', () => {
       const { startDaemon } = await import('./startDaemon');
       run = startDaemon();
       await waitForCondition(
-        () => harness.connectedServicesProjectionChangeListeners.length === 1
+        () => harness.connectedServicesProjectionChangeListeners.length === 2
           && harness.getDaemonControlServerParams() !== null,
         'Expected canonical Pi generation and control-server composition',
       );
@@ -2868,7 +2886,7 @@ describe('startDaemon automation wiring (integration)', () => {
       run = startDaemon();
       await Promise.race([
         waitForCondition(
-          () => harness.connectedServicesProjectionChangeListeners.length === 1
+          () => harness.connectedServicesProjectionChangeListeners.length === 2
             && harness.getDaemonControlServerParams() !== null,
           'Expected canonical generation and control-server composition',
         ),
@@ -3099,7 +3117,7 @@ describe('startDaemon automation wiring (integration)', () => {
       const { startDaemon } = await import('./startDaemon');
       const run = startDaemon();
       await waitForCondition(
-        () => harness.connectedServicesProjectionChangeListeners.length === 1,
+        () => harness.connectedServicesProjectionChangeListeners.length === 2,
         'Expected connected-services projection composition',
       );
       applySpy.mockClear();
@@ -3512,7 +3530,7 @@ describe('startDaemon automation wiring (integration)', () => {
       const { startDaemon } = await import('./startDaemon');
       run = startDaemon();
       await waitForCondition(
-        () => projectionRegistrationSpy.mock.calls.length === 1 && runtimeRegistry !== null,
+        () => projectionRegistrationSpy.mock.calls.length === 2 && runtimeRegistry !== null,
         'Expected the real ApiMachine projection registration and live runtime registry',
       );
       const apiMachineProjectionOwner = realApiMachine as unknown as {
@@ -3690,7 +3708,7 @@ describe('startDaemon automation wiring (integration)', () => {
 
       run = startDaemon();
       await waitForCondition(
-        () => replacementProjectionRegistrationSpy.mock.calls.length === 1
+        () => replacementProjectionRegistrationSpy.mock.calls.length === 2
           && runtimeRegistry !== null
           && runtimeRegistry !== firstDaemonRuntimeRegistry,
         'Expected passive replacement daemon projection and fresh runtime registry',
@@ -3842,7 +3860,7 @@ describe('startDaemon automation wiring (integration)', () => {
       const { startDaemon } = await import('./startDaemon');
       const run = startDaemon();
       await waitForCondition(
-        () => harness.connectedServicesProjectionChangeListeners.length === 1 && runtimeRegistry !== null,
+        () => harness.connectedServicesProjectionChangeListeners.length === 2 && runtimeRegistry !== null,
         'Expected connected-services projection and runtime-registry composition',
       );
       const signal = new AbortController().signal;
@@ -3942,7 +3960,7 @@ describe('startDaemon automation wiring (integration)', () => {
       const { startDaemon } = await import('./startDaemon');
       const run = startDaemon();
       await waitForCondition(
-        () => harness.connectedServicesProjectionChangeListeners.length === 1
+        () => harness.connectedServicesProjectionChangeListeners.length === 2
           && runtimeRegistry !== null
           && daemonTrackedSessionsByPid !== null,
         'Expected connected-services projection, runtime-registry, and tracked-session composition',
@@ -4024,7 +4042,7 @@ describe('startDaemon automation wiring (integration)', () => {
   it('registers a daemon account settings listener that refreshes newer compact live hints', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     harness.setAutoShutdownAfterAutomationStart(false);
-    harness.setActiveAccountSettingsSnapshot({ settingsVersion: 2 });
+    await setAccountSettingsSnapshot({ settingsVersion: 2 });
 
     try {
       const { startDaemon } = await import('./startDaemon');
@@ -4046,7 +4064,9 @@ describe('startDaemon automation wiring (integration)', () => {
       }
 
       await waitForCondition(
-        () => harness.bootstrapAccountSettingsContext.mock.calls.length >= 1,
+        () => harness.bootstrapAccountSettingsContext.mock.calls.some(([params]) => (
+          expect.objectContaining({ refresh: 'force' }).asymmetricMatch(params)
+        )),
         'Expected account settings refresh to be triggered by newer compact hint',
       );
 
@@ -4069,7 +4089,7 @@ describe('startDaemon automation wiring (integration)', () => {
   it('forces an authoritative refresh for equal daemon account settings live hints', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     harness.setAutoShutdownAfterAutomationStart(false);
-    harness.setActiveAccountSettingsSnapshot({ settingsVersion: 3 });
+    await setAccountSettingsSnapshot({ settingsVersion: 3 });
 
     try {
       const { startDaemon } = await import('./startDaemon');
@@ -4091,7 +4111,9 @@ describe('startDaemon automation wiring (integration)', () => {
       }
 
       await waitForCondition(
-        () => harness.bootstrapAccountSettingsContext.mock.calls.length >= 1,
+        () => harness.bootstrapAccountSettingsContext.mock.calls.some(([params]) => (
+          expect.objectContaining({ refresh: 'force' }).asymmetricMatch(params)
+        )),
         'Expected equal-version live hint to force an authoritative account settings refresh',
       );
       expect(harness.bootstrapAccountSettingsContext).toHaveBeenCalledWith(expect.objectContaining({
@@ -4110,7 +4132,7 @@ describe('startDaemon automation wiring (integration)', () => {
   it('forces account settings refresh for conservative reconnect hints without a version', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     harness.setAutoShutdownAfterAutomationStart(false);
-    harness.setActiveAccountSettingsSnapshot({ settingsVersion: 3 });
+    await setAccountSettingsSnapshot({ settingsVersion: 3 });
 
     try {
       const { startDaemon } = await import('./startDaemon');
@@ -4127,7 +4149,9 @@ describe('startDaemon automation wiring (integration)', () => {
       }
 
       await waitForCondition(
-        () => harness.bootstrapAccountSettingsContext.mock.calls.length >= 1,
+        () => harness.bootstrapAccountSettingsContext.mock.calls.some(([params]) => (
+          expect.objectContaining({ refresh: 'force' }).asymmetricMatch(params)
+        )),
         'Expected conservative reconnect hint to force account settings refresh',
       );
 
@@ -4207,7 +4231,7 @@ describe('startDaemon automation wiring (integration)', () => {
 
     try {
       const { resolveAccountSettingsScopeKey } = await import('@/settings/accountSettings/accountSettingsScopeKey');
-      harness.setActiveAccountSettingsSnapshot({
+      await setAccountSettingsSnapshot({
         settingsVersion: 14,
         scopeKey: resolveAccountSettingsScopeKey(automationCredentials),
       });
@@ -4257,7 +4281,7 @@ describe('startDaemon automation wiring (integration)', () => {
   it('spawns without an account settings version hint when daemon freshness refresh fails', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     harness.setAutoShutdownAfterAutomationStart(false);
-    harness.setActiveAccountSettingsSnapshot(null);
+    await setAccountSettingsSnapshot(null);
     harness.bootstrapAccountSettingsContext.mockRejectedValueOnce(
       Object.assign(new Error('Account settings are not fresh enough for this session spawn.'), {
         code: 'ACCOUNT_SETTINGS_STALE',

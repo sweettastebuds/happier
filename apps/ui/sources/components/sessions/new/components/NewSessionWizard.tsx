@@ -50,6 +50,7 @@ import { useNewSessionAttachmentsController } from '@/components/sessions/new/at
 import { isMobileLayoutWidth } from '@/components/sessions/layout/isMobileLayoutWidth';
 import {
     ComposerKeyboardScaffold,
+    ComposerKeyboardScrollInset,
     useComposerAvailablePanelHeight,
 } from '@/components/sessions/keyboardAvoidance';
 import { computeNewSessionComposerPanelMaxHeight } from '@/components/sessions/agentInput/inputMaxHeight';
@@ -184,6 +185,8 @@ export interface NewSessionWizardFooterProps {
 export interface NewSessionWizardProps {
     composerTopContent?: React.ReactNode;
     statusBadges?: React.ComponentProps<typeof AgentInput>['statusBadges'];
+    newSessionAfterSendMode?: React.ComponentProps<typeof AgentInput>['newSessionAfterSendMode'];
+    focusOnMount?: boolean;
     statusTrailingActions?: React.ReactNode;
     popoverBoundaryRef: React.RefObject<RNView>;
     layout: NewSessionWizardLayoutProps;
@@ -573,6 +576,8 @@ export const NewSessionWizard = React.memo(function NewSessionWizard(props: NewS
                                         value={sessionPrompt}
                                         onChangeText={setSessionPrompt}
                                         onSend={handleSend}
+                                        newSessionAfterSendMode={props.newSessionAfterSendMode}
+                                        focusOnMount={props.focusOnMount}
                                         isSendDisabled={!canCreate}
                                         isSending={isCreating}
                                         disabled={isCreating}
@@ -1092,6 +1097,10 @@ export const NewSessionWizard = React.memo(function NewSessionWizard(props: NewS
                             </View>
                         </View>
                     </View>
+                    {/* The native scaffold overlays the composer, so the scroll content must end with
+                        its inset for the last rows to scroll clear of it (0 on web, where the
+                        composer is laid out in flow). */}
+                    <ComposerKeyboardScrollInset testID="new-session-wizard-composer-inset" />
                 </ScrollView>
                 </ComposerKeyboardScaffold>
             </PopoverBoundaryProvider>

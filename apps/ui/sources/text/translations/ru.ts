@@ -644,6 +644,7 @@ export const ru: TranslationStructure = {
             composerFocus: 'Перейти к вводу',
             composerSendImmediate: 'Альтернативная отправка (очередь / направление)',
             composerSendInterrupt: 'Прервать и отправить',
+            composerSendAlternateAfterSend: "Отправить и начать ещё одну / открыть",
             composerSendPending: 'Отправить в очередь ожидания',
             commandPaletteOpen: 'Открыть палитру команд',
             modeCycle: 'Переключить режим',
@@ -797,6 +798,7 @@ export const ru: TranslationStructure = {
     details: "Детали",
     fieldStatus: "Статус",
     fieldAction: "Действие",
+    fieldFailureReason: "Причина ошибки",
     approve: "Подтвердить",
     reject: "Отклонить",
     loadError: "Не удалось загрузить подтверждение.",
@@ -1301,6 +1303,7 @@ export const ru: TranslationStructure = {
     send: "Отправить",
     attach: "Прикрепить",
     addImage: "Добавить изображение",
+    takePhoto: "Сделать фото",
     addFile: "Добавить файл",
     linkFile: "Связать файл",
     files: "Файлы",
@@ -2513,7 +2516,7 @@ export const ru: TranslationStructure = {
           renewal: "Продление",
           renewalOn: "Включено",
           renewalOff: "Выключено",
-          renewalUnknown: "Неизвестно",
+          active: "Активна",
           renews: ({ date }: { date: string }) => `Продление ${date}`,
           ends: ({ date }: { date: string }) => `Окончание ${date}`,
           renewsInDays: ({ days }: { days: number }) => `Продление через ${days} дн.`,
@@ -2665,6 +2668,7 @@ export const ru: TranslationStructure = {
       usageCount: ({ used, limit }: { used: number; limit: number }) =>
         `${used}/${limit} использовано`,
       duration: {
+        seconds: ({ seconds }: { seconds: number }) => `${seconds} с`,
         now: "сейчас",
         outdated: "устарело",
         daysHours: ({ days, hours }: { days: number; hours: number }) =>
@@ -2679,6 +2683,12 @@ export const ru: TranslationStructure = {
       refreshA11y: "Обновить использование и лимиты",
       usageCaption: "Использование",
       resetsCaption: "Сбросы квоты",
+      credits: {
+        title: "Кредиты",
+        balance: ({ balance }: { balance: string }) => `${balance} кредитов`,
+        spent: "Не осталось",
+        includedUsed: "Включённые лимиты исчерпаны · доступны кредиты",
+      },
       usedDetail: ({ used, limit }: { used: string; limit: string }) => `${used}/${limit} использовано`,
       capacity: ({ percent }: { percent: number }) => `${percent}% ёмкости`,
       memberEnabledLabel: "Включено в пуле",
@@ -2713,6 +2723,11 @@ export const ru: TranslationStructure = {
         confirmMessage: "Это применит сброс использования, чтобы сейчас восстановить квоту. Отменить нельзя.",
         confirmCta: "Применить сброс",
       },
+    },
+    requestErrors: {
+      unreachable: "Не удаётся подключиться к серверу Happier. Проверьте сеть или VPN-подключение и повторите попытку.",
+      timeout: "Сервер Happier не ответил вовремя.",
+      serverHttp: ({ status }: { status: string }) => `Сервер Happier вернул ошибку (${status}). Повторите попытку через минуту.`,
     },
     oauthPaste: {
       invalidConfig: "Неверная конфигурация подключённого сервиса.",
@@ -2757,7 +2772,11 @@ export const ru: TranslationStructure = {
       },
       errors: {
         missingState: "Отсутствует состояние OAuth в URL редиректа.",
-        stateMismatch: "Состояние OAuth не совпадает.",
+        stateMismatch: "Этот ответ авторизации не соответствует текущей попытке. Начните новую авторизацию.",
+        rejected: ({ reason }: { reason: string }) => `Провайдер отклонил авторизацию: ${reason}`,
+        rejectedGeneric: "Провайдер отклонил авторизацию.",
+        exchangeOutcomeUnknown: "Не удалось подтвердить завершение входа. Проверьте подключённые аккаунты и при необходимости войдите снова с новым кодом.",
+        responseKept: "Запрос не был отправлен. Проверьте подключение и нажмите «Продолжить», чтобы использовать уже вставленный ответ.",
       },
     },
     oauthEmbedded: {
@@ -3250,6 +3269,8 @@ export const ru: TranslationStructure = {
         `Пропущено ${count} ${plural({ count, one: "файл", few: "файла", many: "файлов" })}, превышающих максимальный размер вложений.`,
       noClipboardImageTitle: "В буфере нет изображения",
       noClipboardImageBody: "Скопируйте изображение, затем вставьте его как вложение.",
+      cameraPermissionDeniedTitle: "Нужен доступ к камере",
+      cameraPermissionDeniedBody: "Разрешите доступ к камере в настройках устройства, чтобы сделать фото.",
     },
   },
 
@@ -3549,7 +3570,7 @@ export const ru: TranslationStructure = {
     trayOpenInHappier: 'Открыть в Happier',
     traySettings: 'Настройки…',
     trayStartAtLogin: 'Запускать при входе',
-    trayStopAndQuit: 'Остановить фоновые службы и выйти',
+    trayStopAndQuit: 'Выйти из Happier (остановить фоновые службы)',
     trayStart: 'Запустить',
     trayRestart: 'Перезапустить',
     trayStop: 'Остановить',
@@ -3565,6 +3586,7 @@ export const ru: TranslationStructure = {
     trayStopAllConfirmBody: 'Сеансы агентов на этом компьютере завершатся, и телефон и браузер не смогут связаться с ним, пока вы снова не откроете Happier.',
     trayStopConfirmAction: 'Остановить',
     trayActionFailedTitle: 'Не получилось',
+    trayQuitWaitForSystemTasks: "Happier ещё настраивает или удаляет компоненты. Дождитесь завершения и попробуйте выйти снова.",
     trayLoginItemFailed: 'Не удалось обновить элемент входа Happier',
     traySessions: ({ count }: { count: string }) => `Сеансы: ${count}`,
     closeStopTitle: 'Сессии агента ещё выполняются',
@@ -3925,6 +3947,39 @@ export const ru: TranslationStructure = {
     },
 
   settingsProviders: {
+        sessionRetention: {
+            invalidSettings: "Исправьте JSON настроек Claude и переподключите компьютер для повторной попытки.",
+            permissionDenied: "Разрешите доступ к файлу настроек Claude и переподключите компьютер.",
+            writeFailed: "Не удалось сохранить настройки Claude. Проверьте доступ к файлу и переподключите компьютер.",
+            managedUnreadable: "Не удалось прочитать настройки организации. Перед изменением срока проверьте разрешения в Claude.",
+            group: "Группа",
+            title: "Хранение сессий",
+            footer: "Настройте срок хранения Claude на уровне пользователя на всех своих машинах. Настройки проекта, организации или явно заданные параметры запуска могут его переопределить.",
+            policy: "Хранить локальную историю",
+            unmanaged: "Сохранить текущие настройки",
+            unmanagedHint: "Прекратить управление; предыдущие изменения сохраняются.",
+            providerDefault: "По умолчанию Claude",
+            providerDefaultHint: "Удалить пользовательский срок и использовать значение Claude по умолчанию.",
+            year: "1 год (365 дней)",
+            century: "100 лет (36 500 дней)",
+            custom: "Другой срок",
+            customDays: "Количество дней",
+            invalidDays: "Введите положительное целое число дней.",
+            machines: "Состояние компьютеров",
+            noMachines: "Здесь появятся сопряжённые компьютеры.",
+            native: "Нативный Claude",
+            profile: "Профиль",
+            applied: "Настроено",
+            unmanagedStatus: "Не управляется",
+            pending: "Ожидание компьютера",
+            unknown: "Обновите daemon для отображения состояния",
+            error: "Не удалось применить срок хранения",
+            managed: "Политика организации может изменить срок хранения",
+            offline: "Не в сети · последнее подтверждённое состояние",
+            confirmTitle: "Сократить срок хранения Claude?",
+            confirmBody: "Более короткий срок может позволить Claude удалить старую локальную историю. Удалённую историю нельзя восстановить. Настройки проекта или организации могут иметь приоритет.",
+            confirmAction: "Применить срок",
+        },
     title: "Настройки провайдера ИИ",
     entrySubtitle: "Настройте параметры для конкретного провайдера",
     footer:
@@ -4807,6 +4862,8 @@ export const ru: TranslationStructure = {
       hiddenInactiveSessionsEmptyStateSubtitle: "Неактивные сессии скрыты в этом списке",
       hiddenInactiveSessionsSectionTitle: "Неактивные сессии",
       hiddenInactiveSessionsSectionSubtitle: "Скрыты в основном списке, потому что там показываются только активные чаты",
+    sessionListGroupGitWorktrees: "Группировать рабочие деревья Git по репозиторию",
+    sessionListGroupGitWorktreesSubtitle: "Объединять сеансы одного репозитория. Отключите для группировки по каталогам.",
     sessionListActiveGrouping: "Группировка активных сессий",
     sessionListActiveGroupingSubtitle:
       "Выберите, как активные сессии группируются в боковой панели",
@@ -5472,8 +5529,9 @@ export const ru: TranslationStructure = {
   },
 
   sessionDrafts: {
-    sectionTitle: 'Черновики', badge: 'Черновик', untitled: 'Черновик без названия', continueEditing: 'Продолжить редактирование', startAnother: 'Начать другой',
-    status: { offline: 'Не в сети', syncing: 'Синхронизация', conflict: 'Конфликт', machineUnavailable: 'Компьютер недоступен', attachmentNeedsAttention: 'Вложение требует внимания', startInterrupted: 'Запуск прерван' },
+    sectionTitle: 'Черновики', badge: 'Черновик', untitled: 'Черновик без названия', continueEditing: 'Продолжить редактирование', startAnother: 'Начать другой', startedOpen: "Сессия запущена · Открыть",
+    status: { offline: 'Не в сети', syncing: 'Синхронизация', conflict: 'Конфликт', machineUnavailable: 'Компьютер недоступен', attachmentNeedsAttention: 'Вложение требует внимания', starting: 'Запуск', startFailed: 'Не удалось запустить' },
+    error: { title: 'Ошибка черновика', storageDescription: 'Не удалось сохранить этот черновик на этом устройстве. Скопируйте текст в надёжное место, прежде чем уйти; сохранение повторится при следующем изменении.', encryptionDescription: "Не удалось синхронизировать черновик на этом устройстве.", showDetailsHint: 'Показывает, почему в черновике ошибка' },
     new: { action: 'Новый черновик' }, delete: { action: 'Удалить черновик', confirmTitle: 'Удалить черновик?', confirmDescription: 'Этот черновик будет удалён с ваших устройств.' },
     conflict: { title: 'Конфликт черновика', description: 'Это поле изменено на другом устройстве.', mine: 'На этом устройстве', synced: 'Синхронизировано', useSynced: 'Использовать синхронизированное', keepDevice: 'Оставить с устройства', copyMine: 'Скопировать моё', copied: 'Скопировано', copyFailed: 'Не удалось скопировать', field: { text: 'Текст', mentions: 'Упоминания', attachments: 'Вложения', recipient: 'Получатель', agentContinuation: 'Продолжение агента', executionRunDelivery: 'Доставка запуска' } },
   },
@@ -5989,9 +6047,10 @@ export const ru: TranslationStructure = {
         overloadAttempt: ({ attempt }: { attempt: number }) => `Попытка ${attempt}`,
       title: "Достигнут лимит использования",
       readyTitle: "Лимит использования сброшен",
-      resetBody: ({ time }: { time: string }) =>
-        `Этот провайдер просит сессию подождать до ${time} перед продолжением.`,
+      resetBody: ({ time, duration }: { time: string; duration?: string }) =>
+        `Этот провайдер просит сессию подождать до ${time}${duration ? ` (${duration})` : ''} перед продолжением.`,
       genericBody: "Этот провайдер просит сессию подождать перед продолжением.",
+      stoppedBody: "Автоматическое восстановление остановлено и не будет повторяться само. Повторите попытку ниже.",
       resetCreditBody: ({ count }: { count: number }) =>
         `${count} ${count === 1 ? "сброс использования доступен" : "сброса использования доступны"}.`,
       resetCreditExpiresBody: ({ count, time }: { count: number; time: string }) =>
@@ -6580,6 +6639,7 @@ export const ru: TranslationStructure = {
 	          waitingForRuntimeActivityNotice: 'Ожидание завершения активности среды выполнения',
 	          runtimeActivityUnknownNotice: 'Ожидание состояния активности среды выполнения',
 	          waitingForRuntimeNotice: 'Ожидание повторного подключения среды выполнения',
+	          steerUnavailableWaitingForTurnNotice: 'Сейчас нельзя направить в этот ход · отправится после него',
 	          nonSteerableNotice: "Текущий ход не может принять уточнение после этого изменения режима. Сообщение выполнится следующим, либо используйте Отправить сейчас, чтобы прервать.",
 	          steerBlockedTerminalDraftNotice: 'Ожидание: черновик в поле ввода терминала блокирует доставку. Очистите его в терминале или прервите ход.',
 	          clearTerminalComposer: {
@@ -6930,8 +6990,12 @@ export const ru: TranslationStructure = {
       },
 
     agentInput: {
+        keepKeyboard: { label: "Не закрывать клавиатуру после отправки" },
+        historyPosition: ({ index, total }: { index: number; total: number }) => `${index} из ${total}`,
         sendOptions: {
             title: "Варианты отправки",
+            sendAndStartAnother: "Отправить и начать ещё одну",
+            sendAndOpen: "Отправить и открыть сессию",
             queue: "В очередь",
             hint: "Удерживайте, чтобы выбрать способ отправки",
         },
@@ -7421,6 +7485,7 @@ export const ru: TranslationStructure = {
         dismiss: 'Закрыть вопрос',
         dismissed: 'Вопрос закрыт',
         submissionFailures: {
+            unconfirmed: "Happier не удалось подтвердить ваш ответ. Повторите попытку или откройте терминал Claude, чтобы проверить его.",
             update: "Обновите Happier CLI и повторите попытку.",
             reconnect: "Переподключите этот сеанс и повторите попытку.",
             retry: "Не удалось принять ответ. Проверьте его и повторите попытку.",
@@ -8311,6 +8376,7 @@ export const ru: TranslationStructure = {
 settingsSession: {
     terminalHostTitle: 'Терминальный хост для новых сеансов',
     terminalHostNone: 'Без терминального хоста',
+    newSessionAfterSend: { title: "После отправки", footer: "Выберите, что происходит при отправке из редактора новой сессии. Удерживайте «Отправить», чтобы выбрать другой вариант для одного сообщения.", openTitle: "Открыть сессию", openSubtitle: "Перейти к сессии сразу после запуска.", startAnotherTitle: "Остаться и начать ещё одну", startAnotherSubtitle: "Продолжить запуск в фоне и открыть новый черновик." },
     newSessionDraftEntry: {
         title: 'Черновики новой сессии',
         footer: 'Выберите, продолжать ли черновик на этом устройстве или открывать новый при выборе «Новая сессия».',
@@ -8484,6 +8550,10 @@ settingsSession: {
         resetHiddenSubtitle: 'Очистить список баннеров, скрытых на этом устройстве.',
     },
     inputBehavior: {
+        keepFocusTitle: "Сохранять фокус в редакторе после отправки",
+        keepFocusSubtitle: "Оставаться в поле сообщения, чтобы сразу написать следующее.",
+        typeToFocusTitle: "Печатать откуда угодно",
+        typeToFocusSubtitle: "Начните печатать вне текстового поля, чтобы перейти в поле сообщения.",
         title: 'Поведение ввода',
         footer: 'Настройте отправку по Enter и поведение истории сообщений.',
         enterToSendEnabledNativeSubtitle: 'Нажмите Enter, чтобы отправить',
@@ -8510,16 +8580,17 @@ settingsSession: {
         manualSubtitle: "Всегда оставлять сообщения в очереди до ручного возобновления сессии.",
       },
       title: "Отправка сообщений",
-      footer:
-        "Определяет, что происходит при отправке сообщения, пока агент работает.",
-        queueInAgentTitle: "В очередь агента (текущий)",
-        queueInAgentSubtitle:
-          "Записать в стенограмму сразу; агент обработает, когда будет готов.",
-        interruptTitle: "Прервать и отправить",
-        interruptSubtitle: "Прервать текущий ход, затем отправить немедленно.",
-        pendingTitle: "Ожидание готовности",
-        pendingSubtitle:
-          "Сообщения ожидают в очереди; агент забирает, когда готов.",
+      footer: 'Выберите, что происходит, когда вы отправляете сообщение во время работы агента.',
+      busySend: {
+        addToTurnTitle: 'Направить в текущий ход',
+        addToTurnSubtitle: 'Агент сразу читает сообщение и продолжает работу, как при вводе в его собственном терминале. Если он не может принять его посреди хода, сообщение ждёт в «Ожидающих» до конца хода.',
+        waitForTurnTitle: 'В очередь до конца хода',
+        waitForTurnSubtitle: 'Сообщение остаётся в «Ожидающих», где его можно изменить или переставить, и отправляется после хода.',
+        interruptTitle: 'Прервать и отправить',
+        interruptSubtitle: 'Останавливает работу агента и сразу отправляет сообщение.',
+      },
+      inactiveSessionsTitle: 'Неактивные сеансы',
+      inactiveSessionsFooter: 'Применяется при отправке в сеанс, агент которого остановлен или машина не в сети.',
         pendingDrainModeTitle: "Обработка очереди ожидания",
         pendingDrainModeFooter:
           "Выберите, забирает ли агент одно сообщение при каждой готовности или обрабатывает всю очередь ожидания сразу.",
@@ -8541,17 +8612,6 @@ settingsSession: {
           afterRuntimeIdleTitle: "Когда runtime неактивен",
           afterRuntimeIdleSubtitle:
             "Держать ожидающие сообщения в очереди, пока продолжается отслеживаемая активность runtime.",
-        },
-        busySteerPolicyTitle: "Когда агент занят (с поддержкой управления)",
-        busySteerPolicyFooter:
-          "Если агент поддерживает управление на лету, выберите, отправлять ли сообщения сразу или сначала в «Ожидание».",
-        busySteerPolicy: {
-          steerImmediatelyTitle: "Управлять сразу",
-          steerImmediatelySubtitle:
-            "Отправить сразу и направить текущий ход (без прерывания).",
-          queueForReviewTitle: "В очередь «Ожидание»",
-          queueForReviewSubtitle:
-            "Сначала поместить в «Ожидание»; отправить позже через «Направить сейчас».",
         },
         nonSteerablePromptTitle: 'Когда сообщение нельзя направить в активный ход',
         nonSteerablePromptFooter: 'Смена режима разрешений и /clear или /compact не применяются в середине хода. Выберите, что Happier делает с такими сообщениями, пока агент занят.',
@@ -8596,6 +8656,8 @@ settingsSession: {
         customResumePromptPlaceholder: "Продолжай с того места, где остановился.",
       },
       providerUsageGauge: {
+          numberTitle: "Число в центре колец",
+          numberSubtitle: "Выберите лимит для числа внутри колец. Если он недоступен, используется самый ограничивающий лимит.",
         title: "Использование провайдера",
         footer:
           "Выберите индикаторы редактора для всех аккаунтов. Они учитывают лимиты использования, выбранные в каждом пуле. Избранные лимиты добавляют индикаторы активного аккаунта.",
@@ -10735,7 +10797,15 @@ settingsSession: {
     },
     cliPath: {
       title: "Терминал",
-      footer: "Happier Desktop добавляет и удаляет только те записи PATH, которые создал сам; записи установщика оболочки остаются нетронутыми.",
+      footer: "Happier Desktop изменяет только созданные им записи PATH; записи установщика оболочки остаются без изменений.",
+      cleanupTitle: "Удалить компоненты Desktop",
+      cleanupSubtitle: "Удалить командную строку и фоновые службы Desktop, затем выйти.",
+      cleanupConfirmTitle: "Удалить компоненты Desktop и выйти?",
+      cleanupConfirmBody: "Будут удалены файлы командной строки, записи PATH и службы, принадлежащие Desktop, если они не нужны другому приложению Desktop. Общие и установленные вами компоненты, история сеансов и данные учётной записи сохранятся. Удаляемые службы останавливаются, что может прервать текущие сеансы и удалённый доступ.\n\nПосле очистки Desktop закроется. Затем удалите приложение средствами операционной системы; в macOS или портативном Linux удалите пакет или файл приложения. При повторном открытии Desktop компоненты могут быть настроены заново.",
+      cleanupConfirmAction: "Удалить компоненты и выйти",
+      cleanupBusy: "Удаление компонентов Desktop…",
+      cleanupFailed: "Очистка не завершена. Повторите попытку.",
+      cleanupQuitFailed: "Очистка завершена, но Desktop не удалось закрыться. Закройте приложение перед удалением.",
       addTitle: "Добавить happier в PATH",
       addSubtitle: "Сделать команду happier доступной в новых терминалах.",
       removeTitle: "Удалить happier из PATH",
@@ -10843,11 +10913,16 @@ settingsSession: {
   },
 
   message: {
+    provenanceFrom: ({ source }: { source: string }) => `От ${source}`,
+    provenanceSession: 'Сессия',
     sessionReferenceUnavailable: "Сессия недоступна",
     sessionReferenceOpen: ({ name }: { name: string }) => `Открыть сессию ${name}`,
     switchedToMode: ({ mode }: { mode: string }) =>
       `Переключено в режим ${mode}`,
     discarded: "Отброшено",
+    readAloudA11y: "Прочитать вслух",
+    stopReadAloudA11y: "Остановить чтение вслух",
+    readAloudFailed: "Не удалось прочитать это сообщение вслух. Проверьте настройки голоса.",
     recoveredHistory: "Восстановленная история",
     unknownEvent: "Неизвестное событие",
     contextCompactionStarted: "Сжатие контекста...",
@@ -10896,7 +10971,7 @@ settingsSession: {
     sessionRunningLocally:
       "Эта сессия запущена локально на этом компьютере. Вы можете переключиться на удалённый режим, чтобы управлять из приложения.",
     sessionRunningLocallyAndRemotely:
-      "Эта сессия локально подключена в OpenCode и по-прежнему управляется из приложения.",
+      "Эта сессия локально подключена и по-прежнему управляется из приложения.",
     switchingToRemote: "Переключение в удалённый режим…",
     switchToRemote: "Переключиться на удалённый",
     detachLocalTerminal: "Отсоединить терминал",
@@ -10990,6 +11065,13 @@ settingsSession: {
       codeCopied: "Код скопирован",
       copyFailed: "Ошибка копирования",
       mermaidRenderFailed: "Не удалось отобразить диаграмму mermaid",
+      table: {
+          open: "Открыть таблицу",
+          copyCsv: "Копировать как CSV",
+          copyMarkdown: "Копировать как Markdown",
+          csvLabel: "CSV",
+          viewerTitle: "Таблица",
+      },
       diffLabel: "Дифф",
       codeLabel: "Код",
 

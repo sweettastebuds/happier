@@ -2,6 +2,9 @@ import type { VoicePlaybackStopperRegistrar } from '@/voice/runtime/VoicePlaybac
 import { VoiceLocalTtsSchema } from '@/sync/domains/settings/voiceLocalTtsSettings';
 import { speakWithLocalTtsProvider } from '@/voice/backends/tts/runtime';
 import { patchLocalVoiceState, resolveLocalVoiceError } from '@/voice/local/localVoiceState';
+import { stopReadAloud } from '@/voice/local/readAloudState';
+import { resolveLocalVoiceAdapterSettings } from '@/voice/local/localVoiceSettings';
+import { resolveStreamingTtsChunkChars } from '@/voice/output/TtsChunker';
 import { toSpeechText, type SpeechTextContext } from '@/voice/output/speechText';
 
 /**
@@ -17,23 +20,23 @@ export async function speakAssistantText(params: {
   networkTimeoutMs: number;
   registerPlaybackStopper: VoicePlaybackStopperRegistrar;
   onSpeaking: () => void;
+  purpose?: 'read-aloud';
 }): Promise<boolean> {
   const spoken = toSpeechText(params.text, params.speechTextContext);
   if (!spoken) return true;
+  if (params.purpose !== 'read-aloud') stopReadAloud();
 
-  const voice = params.settings?.voice ?? null;
-  const providerId = voice?.providerId;
-  const adapter =
-    providerId === 'local_direct'
-      ? voice?.adapters?.local_direct
-      : voice?.adapters?.local_conversation ?? voice?.adapters?.local_direct;
+  const { config } = resolveLocalVoiceAdapterSettings(params.settings);
 
   let providerLabel = 'unknown';
   try {
-    const tts = VoiceLocalTtsSchema.parse(adapter?.tts ?? {});
+    const tts = VoiceLocalTtsSchema.parse(config?.tts ?? {});
     providerLabel = tts.provider;
     await speakWithLocalTtsProvider({
       text: spoken,
+      readAloudChunkChars: params.purpose === 'read-aloud'
+        ? resolveStreamingTtsChunkChars(config?.streaming?.ttsChunkChars)
+        : undefined,
       settings: params.settings,
       tts,
       networkTimeoutMs: params.networkTimeoutMs,

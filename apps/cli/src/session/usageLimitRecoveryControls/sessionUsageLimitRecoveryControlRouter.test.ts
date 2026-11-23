@@ -1,3 +1,4 @@
+import { createCodexAppServerUsageLimitRecoveryControlAdapter } from '@/backends/codex/appServer/usageLimitRecoveryControl/codexAppServerUsageLimitRecoveryControlAdapter';
 import { createClaudeUsageLimitRecoveryControlAdapter } from '@/backends/claude/connectedServices/claudeUsageLimitRecoveryControlAdapter';
 import { buildCodexAgentRuntimeDescriptor } from '@happier-dev/agents';
 import {
@@ -229,6 +230,39 @@ describe('sessionUsageLimitRecoveryControlRouter', () => {
     });
     expect((persisted.sessionUsageLimitRecoveryV1 as { armedAtMs: number }).armedAtMs)
       .toBeGreaterThan(cancelled.armedAtMs);
+  });
+
+  it.each([
+    ['stopped', 'cancelled', 'usage_limit_recovery_stopped'],
+    ['dead-lettered', 'exhausted', 'max_attempts_exhausted'],
+] as const)('re-arms a %s daemon attempt as a fresh wait for the current issue, detached from that attempt', async (_label, status, lastProbeError) => {
+    const issue = createUsageLimitIssue();
+    const terminal = {
+      v: 1, status, issueFingerprint: 'usage-limit:codex:turn-1:1699999999000:no-reset',
+      runtimeAuthRecoveryAttemptId: 'dead-attempt', armedAtMs: 1_700_000_001_000,
+      resetAtMs: null, nextCheckAtMs: null, attemptCount: 3, maxAttempts: 3,
+      lastProbeError, resumePromptMode: 'standard', selectedAuth: { kind: 'native' },
+    };
+
+    await routeSessionUsageLimitRecoveryWaitResumeEnable({
+      token: 'token', credentials: createCredentials(), sessionId: 'sess_1',
+      rawSession: createRawSession({ latestTurnStatus: 'failed', lastRuntimeIssue: issue }),
+      metadata: createMetadata({ sessionUsageLimitRecoveryV1: terminal }),
+      currentMachineId: 'machine-local', ctx, mode: 'plain',
+      request: { sessionId: 'sess_1', issueFingerprint: terminal.issueFingerprint },
+      callLiveSessionRpc: vi.fn(), resolveAdapter: vi.fn(),
+    });
+
+    const persisted = lastMetadataUpdaterResult({ sessionUsageLimitRecoveryV1: terminal })
+      .sessionUsageLimitRecoveryV1 as Record<string, unknown>;
+    expect(persisted).toMatchObject({
+      status: 'waiting', attemptCount: 0, lastProbeError: null,
+      issueFingerprint: buildUsageLimitIssueFingerprint(issue),
+      resetAtMs: issue.usageLimit?.resetAtMs,
+      nextCheckAtMs: issue.usageLimit?.resetAtMs,
+    });
+    expect(persisted).not.toHaveProperty('runtimeAuthRecoveryAttemptId');
+    expect(persisted.armedAtMs).toBeGreaterThan(terminal.armedAtMs);
   });
 
   it('preserves an existing inactive recovery resumePromptMode when re-arming without explicit input', async () => {
@@ -987,6 +1021,77 @@ describe('sessionUsageLimitRecoveryControlRouter', () => {
       expect(liveRpc).not.toHaveBeenCalled();
       expect(scheduler.readForSession('sess_owner')[0]?.attemptId).toBe(begun.attemptId);
     } finally { scheduler.dispose(); }
+  });
+
+  it('routes historical 45ms enrichment to the owning attempt and excludes a newer failed turn', async () => {
+    const first = { ...createUsageLimitIssue({ resetAtMs: null }), provider: 'claude', providerTurnId: undefined,
+      occurredAt: 1793871333659 };
+    const issue = { ...first, occurredAt: 1793871333704,
+      usageLimit: { ...first.usageLimit, resetAtMs: 1794283200000 } };
+    const metadata = createMetadata({ sessionUsageLimitRecoveryV1: {
+      v: 1, status: 'waiting', issueFingerprint: buildUsageLimitIssueFingerprint(first),
+      runtimeAuthRecoveryAttemptId: 'same-failed-turn', armedAtMs: 1793871335690,
+      resetAtMs: null, nextCheckAtMs: null, attemptCount: 0, maxAttempts: 5,
+      lastProbeError: null, selectedAuth: { kind: 'native' },
+    } });
+    const params = { token: 'token', credentials: createCredentials(), sessionId: 'historical-owner',
+      rawSession: createRawSession({ id: 'historical-owner', latestTurnStatus: 'failed', lastRuntimeIssue: issue }),
+      metadata, currentMachineId: 'machine-local', ctx, mode: 'plain' as const,
+      callLiveSessionRpc: async () => undefined };
+    // This callback is the daemon transport boundary, not a stub of recovery policy.
+    const checkOwner = vi.fn(async () => ({ ok: true, status: 'waiting' }));
+    expect(parseOperationResult(await routeSessionUsageLimitRecoveryCheckNow({ ...params,
+      checkRuntimeAuthUsageLimitRecovery: checkOwner,
+    }))).toMatchObject({ ok: true, status: 'waiting' });
+    expect(checkOwner).toHaveBeenCalledWith({ sessionId: 'historical-owner', attemptId: 'same-failed-turn' });
+    checkOwner.mockClear();
+    await routeSessionUsageLimitRecoveryCheckNow({ ...params,
+      rawSession: { ...params.rawSession, lastRuntimeIssue: { ...issue, occurredAt: 1793871335691, providerTurnId: 'new-turn' } },
+      checkRuntimeAuthUsageLimitRecovery: checkOwner,
+    });
+    expect(checkOwner).not.toHaveBeenCalled();
+  });
+
+  it('keeps probing after Codex invalidates the previously recorded reset', async () => {
+    vi.useFakeTimers();
+    const issue = createUsageLimitIssue();
+    const resetAtMs = issue.usageLimit.resetAtMs!;
+    vi.setSystemTime(resetAtMs - 10_000);
+    let metadata = createMetadata({ sessionUsageLimitRecoveryV1: {
+      v: 1, status: 'waiting', issueFingerprint: buildUsageLimitIssueFingerprint(issue),
+      armedAtMs: issue.occurredAt, resetAtMs, nextCheckAtMs: resetAtMs, attemptCount: 0,
+      maxAttempts: 3, lastProbeError: null, resumePromptMode: 'standard', selectedAuth: { kind: 'native' },
+    } });
+    const request = vi.fn(async () => ({ primary: { usedPercent: 100 } }));
+    const adapter = createCodexAppServerUsageLimitRecoveryControlAdapter({
+      runWithControlClient: async ({ run }) => ({ ok: true, value: await run({
+        request, notify: async () => {},
+        registerRequestHandler: () => () => {},
+        registerNotificationHandler: () => () => {},
+      }) }),
+    });
+    const resume = vi.fn(async () => true);
+    const check = () => routeSessionUsageLimitRecoveryCheckNow({
+      token: 'token', credentials: createCredentials(), sessionId: 'codex-untimed-reset',
+      rawSession: createRawSession({ id: 'codex-untimed-reset', latestTurnStatus: 'failed', lastRuntimeIssue: issue }),
+      metadata, currentMachineId: 'machine-local', ctx, mode: 'plain',
+      callLiveSessionRpc: vi.fn(), resolveAdapter: async () => adapter, resumeInactiveSessionWhenReady: resume,
+    });
+    try {
+      for (const now of [resetAtMs - 10_000, resetAtMs + 60_000]) {
+        vi.setSystemTime(now);
+        mocks.updateSessionMetadataWithRetry.mockImplementationOnce(async ({ updater }) => {
+          metadata = updater(metadata);
+          return { version: 2, metadata };
+        });
+        expect(parseOperationResult(await check())).toMatchObject({ ok: true, status: 'waiting' });
+        expect(metadata.sessionUsageLimitRecoveryV1).toMatchObject({ resetAtMs: null, nextCheckAtMs: null });
+      }
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(resume).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps unowned native off mode passive when its backoff adapter becomes ready', async () => {

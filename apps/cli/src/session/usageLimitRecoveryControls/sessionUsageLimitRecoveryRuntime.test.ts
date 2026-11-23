@@ -101,7 +101,7 @@ function createLiveFixture(options: Readonly<{
     readRecovery: () => SessionUsageLimitRecoveryV1Schema.parse(metadata.sessionUsageLimitRecoveryV1) };
 }
 
-async function createQuotaProbeServer(root: string, usedPercent: number, resetAtMs: number) {
+async function createQuotaProbeServer(root: string, usedPercent: number, resetAtMs: number | null) {
   const requestLog = join(root, 'requests.jsonl');
   const script = await writeFakeCodexAppServerScript({ dir: root,
     importLines: ['import { appendFile } from "node:fs/promises";'],
@@ -112,7 +112,7 @@ async function createQuotaProbeServer(root: string, usedPercent: number, resetAt
       `  if (msg.method) await appendFile(${JSON.stringify(requestLog)}, JSON.stringify(msg) + "\\n");`,
       '  if (msg.id === undefined) continue;',
       '  const result = msg.method === "initialize" ? { serverInfo: { name: "fake-codex", version: "0.0.0" } }',
-      `    : msg.method === "account/rateLimits/read" ? { rateLimits: { primary: { usedPercent: ${usedPercent}, resetsAt: ${resetAtMs / 1_000} } } } : {};`,
+      `    : msg.method === "account/rateLimits/read" ? { rateLimits: { primary: { usedPercent: ${usedPercent}, resetsAt: ${resetAtMs === null ? null : resetAtMs / 1_000} } } } : {};`,
       '  process.stdout.write(JSON.stringify({ id: msg.id, result }) + "\\n");',
       '}',
     ],
@@ -180,6 +180,28 @@ describe('generic usage-limit continuation through the session control boundary'
       expect(network.enqueue).toHaveBeenCalledOnce();
       expect(network.machineRpc).not.toHaveBeenCalled();
     } finally { fixture.runtime.dispose(); scheduler.dispose(); await app.close(); await removeTempDir(root); }
+  });
+
+  it('preserves the daemon-owned attempt when the live observer receives the historical enrichment', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1793871335691);
+    const first: SessionRuntimeIssueV1 = { ...issue, provider: 'claude', providerTurnId: undefined,
+      occurredAt: 1793871333659, usageLimit: { ...issue.usageLimit!, resetAtMs: null,
+        connectedService: { serviceId: 'claude-subscription', groupId: 'pool', profileId: 'primary' } } };
+    const enriched = { ...first, occurredAt: 1793871333704,
+      usageLimit: { ...first.usageLimit!, resetAtMs: 1794283200000 } };
+    const recovery: SessionUsageLimitRecoveryV1 = { v: 1, status: 'waiting',
+      issueFingerprint: buildUsageLimitIssueFingerprint(first), armedAtMs: 1793871335690,
+      runtimeAuthRecoveryAttemptId: 'historical-daemon-attempt', resetAtMs: null, nextCheckAtMs: 1794283200000,
+      attemptCount: 1, maxAttempts: 3, lastProbeError: null, resumePromptMode: 'standard',
+      selectedAuth: { kind: 'group', serviceId: 'claude-subscription', groupId: 'pool', profileId: 'primary' } };
+    const fixture = createLiveFixture({ issue: enriched,
+      metadata: { flavor: 'claude', sessionUsageLimitRecoveryV1: recovery },
+      settings: accountSettingsParse({ usageLimitRecoverySettingsV1: { v: 1, mode: 'auto_wait' } }) });
+    try {
+      await fixture.runtime.observeFailure(enriched);
+      expect(fixture.readRecovery()).toEqual(recovery);
+    } finally { fixture.runtime.dispose(); }
   });
 
   it('continues a native-login Grok usage limit through the Session owner without a Connected Account', async () => {
@@ -440,7 +462,7 @@ describe('generic usage-limit continuation through the session control boundary'
     } finally { fixture.runtime.dispose(); }
   });
 
-  it('restores null timing through the established fallback anchored to the recovery lifecycle', async () => {
+  it('restores the fallback wake without continuing a failure with unknown timing', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(300);
     const untimedIssue: SessionRuntimeIssueV1 = { ...issue, usageLimit: { ...issue.usageLimit!, resetAtMs: null } };
@@ -455,11 +477,12 @@ describe('generic usage-limit continuation through the session control boundary'
       await vi.advanceTimersByTimeAsync(599_799);
       expect(network.enqueue).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      expect(network.enqueue).toHaveBeenCalledOnce();
+      expect(network.enqueue).not.toHaveBeenCalled();
+      expect(fixture.readRecovery().status).toBe('waiting');
     } finally { fixture.runtime.dispose(); }
   });
 
-  it('schedules public enable for an untimed provider failure even when no quota probe exists', async () => {
+  it('schedules a wake without attempting an untimed continuation', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(300);
     const untimedIssue: SessionRuntimeIssueV1 = { ...issue, usageLimit: { ...issue.usageLimit!, resetAtMs: null } };
@@ -474,8 +497,8 @@ describe('generic usage-limit continuation through the session control boundary'
       await vi.advanceTimersByTimeAsync(nextCheckAtMs - Date.now() - 1);
       expect(network.enqueue).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      expect(network.enqueue).toHaveBeenCalledOnce();
-      await vi.waitFor(() => expect(fixture.readRecovery().status).toBe('cancelled'));
+      expect(network.enqueue).not.toHaveBeenCalled();
+      expect(fixture.readRecovery().status).toBe('waiting');
     } finally { fixture.runtime.dispose(); }
   });
 
@@ -522,6 +545,38 @@ describe('generic usage-limit continuation through the session control boundary'
       expect(fixture.rawSession.lastRuntimeIssue?.usageLimit?.resetAtMs).toBeNull();
       expect(network.enqueue).toHaveBeenCalledOnce();
       expect(fixture.readRecovery().status).toBe('cancelled');
+    } finally { fixture.runtime.dispose(); scope.restore(); await removeTempDir(root); }
+  });
+
+  it('keeps an invalidated Codex reset unknown when the scheduler settles a real probe', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const startedAtMs = 1_700_000_000_000;
+    const resetAtMs = startedAtMs + 60_000;
+    vi.setSystemTime(startedAtMs);
+    const root = await createTempDir('usage-limit-codex-unknown-reset-');
+    const scope = createCodexAppServerTestEnvScope();
+    const { script, requestLog } = await createQuotaProbeServer(root, 100, null);
+    scope.patch(createCodexAppServerProcessEnv(script, { CODEX_HOME: root }));
+    const codexIssue: SessionRuntimeIssueV1 = { ...issue, provider: 'codex', occurredAt: startedAtMs,
+      usageLimit: { ...issue.usageLimit!, resetAtMs } };
+    const fixture = createLiveFixture({ issue: codexIssue, metadata: { path: root, flavor: 'codex',
+      agentRuntimeDescriptorV1: { v: 1, providerId: 'codex', provider: { backendMode: 'appServer' } },
+    } });
+    try {
+      expect(await fixture.runtime.controls.enableUsageLimitWaitResume({ sessionId: fixture.sessionId }))
+        .toMatchObject({ ok: true });
+      expect(fixture.readRecovery().resetAtMs).toBe(resetAtMs);
+      for (const now of [startedAtMs, resetAtMs]) {
+        vi.setSystemTime(now);
+        expect(await fixture.runtime.controls.checkUsageLimitRecoveryNow({ sessionId: fixture.sessionId }))
+          .toMatchObject({ ok: true, status: 'waiting' });
+        expect(fixture.readRecovery()).toMatchObject({ status: 'waiting', resetAtMs: null });
+        expect(fixture.readRecovery().nextCheckAtMs).toBeGreaterThan(now);
+      }
+      const requests = (await readFile(requestLog, 'utf8')).trim().split('\n')
+        .map((line) => JSON.parse(line) as { method: string });
+      expect(requests.filter((request) => request.method === 'account/rateLimits/read')).toHaveLength(2);
+      expect(network.enqueue).not.toHaveBeenCalled();
     } finally { fixture.runtime.dispose(); scope.restore(); await removeTempDir(root); }
   });
 

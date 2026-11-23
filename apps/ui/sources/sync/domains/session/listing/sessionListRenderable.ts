@@ -1,4 +1,5 @@
 import type { Metadata, Session } from '@/sync/domains/state/storageTypes';
+import { readSessionRepositoryV1FromMetadata, type SessionRepositoryV1 } from '@happier-dev/protocol';
 import { resolveAgentIdFromSessionMetadata } from '@happier-dev/agents';
 import { computeHasUnreadActivity } from '@/sync/domains/messages/unread';
 import type {
@@ -36,6 +37,7 @@ import {
 } from './placement/sessionListPlacementProjection';
 import { didSessionListWorkingRetentionInputsChange } from './placement/sessionListWorkingRetention';
 import { reconcileSessionSnapshot } from '../sessionLifecycleProjection';
+import { getSessionStorageKind } from '../sessionStorageKind';
 import {
     deriveSessionRuntimePresentationState,
     resolveSessionRuntimePresenceFields,
@@ -50,8 +52,10 @@ export interface SessionListRenderableMetadata {
     homeDir?: string | null;
     host?: string | null;
     machineId?: string | null;
+    sessionRepositoryV1?: SessionRepositoryV1 | null;
     /** Canonical Agent identity resolved before discarding full metadata evidence. */
     flavor?: string | null;
+    directTranscriptPendingV1?: true;
     directSessionV1?: {
         v: 1;
         providerId?: string;
@@ -279,7 +283,9 @@ export function buildSessionListRenderableMetadata(metadata: Metadata | null | u
         homeDir: typeof metadata.homeDir === 'string' ? metadata.homeDir : null,
         host: typeof metadata.host === 'string' ? metadata.host : null,
         machineId: typeof metadata.machineId === 'string' ? metadata.machineId : null,
+        sessionRepositoryV1: readSessionRepositoryV1FromMetadata(metadata),
         flavor: resolveAgentIdFromSessionMetadata(metadata),
+        ...(metadata.directTranscriptPendingV1 === true ? { directTranscriptPendingV1: true } : {}),
         directSessionV1,
         readStateV1,
         agentActivityCounts: deriveAgentActivityCounts(agentActivityEntries.map(toAgentActivityCountable)),
@@ -500,10 +506,11 @@ export function preserveSessionListRenderableStaleFields(
         && previous?.metadata == null
         && previous?.metadataUnavailable === true;
     const preserveDirectSessionClassification =
-        previous?.metadata?.directSessionV1 != null
+        previous?.metadata != null
         && next.metadata != null
-        && next.metadata.directSessionV1 == null
-        && previous.metadataVersion === next.metadataVersion;
+        && previous.metadataVersion === next.metadataVersion
+        && getSessionStorageKind(previous) === 'direct'
+        && getSessionStorageKind(next) === 'persisted';
 
     if (
         previous == null
@@ -517,6 +524,7 @@ export function preserveSessionListRenderableStaleFields(
         : preserveDirectSessionClassification
             ? {
                 ...(next.metadata as SessionListRenderableMetadata),
+                directTranscriptPendingV1: previous.metadata?.directTranscriptPendingV1,
                 directSessionV1: previous.metadata?.directSessionV1 ?? null,
             }
             : next.metadata;
@@ -533,6 +541,12 @@ export function preserveSessionListRenderableStaleFields(
     };
 }
 
+function areSessionRepositoriesEqual(previous: SessionRepositoryV1 | null | undefined, next: SessionRepositoryV1 | null | undefined): boolean {
+    return (previous?.machineId ?? null) === (next?.machineId ?? null)
+        && (previous?.rootPath ?? null) === (next?.rootPath ?? null)
+        && (previous?.worktreePath ?? null) === (next?.worktreePath ?? null);
+}
+
 function areSessionListRenderableMetadataEqual(
     previous: SessionListRenderableMetadata | null | undefined,
     next: SessionListRenderableMetadata | null | undefined,
@@ -546,7 +560,9 @@ function areSessionListRenderableMetadataEqual(
         && (previous.homeDir ?? null) === (next.homeDir ?? null)
         && (previous.host ?? null) === (next.host ?? null)
         && (previous.machineId ?? null) === (next.machineId ?? null)
+        && areSessionRepositoriesEqual(previous.sessionRepositoryV1, next.sessionRepositoryV1)
         && (previous.flavor ?? null) === (next.flavor ?? null)
+        && previous.directTranscriptPendingV1 === next.directTranscriptPendingV1
         && (previous.directSessionV1?.v ?? null) === (next.directSessionV1?.v ?? null)
         && (previous.directSessionV1?.providerId ?? null) === (next.directSessionV1?.providerId ?? null)
         && (previous.readStateV1?.v ?? null) === (next.readStateV1?.v ?? null)
@@ -754,6 +770,8 @@ export function didSessionListRenderableStructuralFieldsChange(
     if (String(prevMeta?.path ?? '') !== String(nextMeta?.path ?? '')) return true;
     if (String(prevMeta?.homeDir ?? '') !== String(nextMeta?.homeDir ?? '')) return true;
     if ((prevMeta?.hiddenSystemSession === true) !== (nextMeta?.hiddenSystemSession === true)) return true;
+    if (!areSessionRepositoriesEqual(prevMeta?.sessionRepositoryV1, nextMeta?.sessionRepositoryV1)
+        && didSessionListRenderableProjectGroupingFieldsChange(previous, next)) return true;
 
     return false;
 }
@@ -784,7 +802,9 @@ function areSessionListRenderableEmbeddedRowMetadataEqual(
         && (previous.homeDir ?? null) === (next.homeDir ?? null)
         && (previous.host ?? null) === (next.host ?? null)
         && (previous.machineId ?? null) === (next.machineId ?? null)
+        && areSessionRepositoriesEqual(previous.sessionRepositoryV1, next.sessionRepositoryV1)
         && (previous.flavor ?? null) === (next.flavor ?? null)
+        && previous.directTranscriptPendingV1 === next.directTranscriptPendingV1
         && (previous.directSessionV1?.v ?? null) === (next.directSessionV1?.v ?? null)
         && (previous.directSessionV1?.providerId ?? null) === (next.directSessionV1?.providerId ?? null)
         && (previous.readStateV1?.v ?? null) === (next.readStateV1?.v ?? null)
@@ -874,6 +894,7 @@ export function didSessionListRenderableProjectGroupingFieldsChange(
     const nextParts = resolveSessionProjectGroupingKeyParts(nextMeta ?? null);
 
     if (prevParts.pathKey !== nextParts.pathKey) return true;
+    if (prevParts.repositoryPathKey !== nextParts.repositoryPathKey) return true;
     if (prevParts.machineGroupId !== nextParts.machineGroupId) return true;
 
     return false;
@@ -952,6 +973,7 @@ export function didSessionListRenderableWarmCacheFieldsChange(
     if ((prevMeta?.machineId ?? null) !== (nextMeta?.machineId ?? null)) return true;
     if ((prevMeta?.flavor ?? null) !== (nextMeta?.flavor ?? null)) return true;
     if ((prevMeta?.hiddenSystemSession === true) !== (nextMeta?.hiddenSystemSession === true)) return true;
+    if (prevMeta?.directTranscriptPendingV1 !== nextMeta?.directTranscriptPendingV1) return true;
     if ((prevMeta?.directSessionV1?.v ?? null) !== (nextMeta?.directSessionV1?.v ?? null)) return true;
     if ((prevMeta?.directSessionV1?.providerId ?? null) !== (nextMeta?.directSessionV1?.providerId ?? null)) return true;
 

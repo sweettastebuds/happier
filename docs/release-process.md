@@ -501,8 +501,10 @@ prune local branch, remote-tracking, or tag refs.
 
 When a hosted run fails, use native failed-job rerun if workflow code and
 candidate bytes are unchanged. If workflow control changed, resume the failed
-operation through `hmaint release resume`; a new attempt may reuse only
-individually verified immutable candidates from the exact prior run. Any
+operation through `hmaint release resume`; a new attempt reuses exact published
+immutable candidates from the prior run, including candidates whose verification
+failed. Reuse skips rebuilding and signing;
+the candidate verification jobs still run before promotion. Any
 release-output-affecting source change requires new release outputs.
 
 Use this decision table instead of restarting the full graph:
@@ -511,6 +513,8 @@ Use this decision table instead of restarting the full graph:
 | --- | --- |
 | Same control SHA; transient runner, download, read-only API, or safely recoverable external failure | `gh run rerun <run-id> --failed` |
 | Corrected workflow control, tests, or validation; unchanged candidate bytes; terminal origin with verified candidates | `hmaint release resume` from the richest valid origin |
+| Published immutable candidate; verification failed; unchanged candidate bytes | `hmaint release resume` binds the published version and re-verifies existing bytes without rebuilding |
+| Legacy status omitted the published candidate version | Resume resolves a unique public product/channel release whose lightweight tag points to the exact authorized source SHA; missing or ambiguous identity fails closed |
 | Changed source, package/build dependency, signing input, or immutable candidate bytes | Prepare a fresh release |
 | Ambiguous publication mutation | Inspect the canonical remote state, then use the owning recovery-aware job; never blind-retry |
 
@@ -542,6 +546,13 @@ without `.github/workflows/`; do not add a long-lived `NPM_TOKEN` fallback.
 otherwise healthy usually means the top-level caller is absent or mismatched in
 npm's trusted-publisher configuration. Verify the package/version in the npm
 registry after publication rather than relying only on the workflow badge.
+
+The nightly `dev` release promotes the verified CLI candidate first, then calls
+`release-npm.yml` with `channel=dev`, `npm_tag=dev`, and the exact candidate SHA and
+version. This publishes `@happier-dev/cli@dev`; stable remains `latest` and preview
+remains `next`. The reusable workflow uses the existing `release-shared` environment,
+npm trusted publishing, and provenance permissions, so those environment credentials
+must be reachable from the nightly caller.
 
 For CLI, stack, server-runtime, and UI-web binary releases:
 
@@ -776,26 +787,88 @@ gh workflow run publish-server-runtime.yml \
 
 ## Deploy branches → production infrastructure
 
-Pushes to `deploy/<env>/*` are intended to trigger deployment automation (for example, calling a protected deploy hook behind Cloudflare Access). How deployments are performed is intentionally decoupled from how code is promoted into deploy branches.
+Development change, pending operator switch: server and UI promotion publish
+hosted images in CI before advancing the deploy ref with the existing
+compare-and-swap operation. The publisher builds from that exact candidate and
+returns `hosted_images`, mapping each service to
+`ghcr.io/happier-dev/relay-server:<server-version>-<channel>-<source-sha>@sha256:<digest>`
+for both API and worker, and `ghcr.io/happier-dev/webapp:<ui-version>-<channel>-<source-sha>@sha256:<digest>` for UI.
+Channel tags remain convenient aliases; deployment consumes the digest-pinned
+output. API and worker use the same public relay image with full/Postgres runtime
+env; UI uses the generic webapp stage, published to both GHCR and
+`happierdev/webapp` on Docker Hub. Server promotion requires the exact server
+artifact version, supplied by runtime publication or the `server_version` input;
+the immutable release target must match the hosted image's candidate SHA.
 
-In this repo, the deploy hook is implemented by the **DEPLOY — Deploy Branch** workflow:
+After a changed deploy ref, or when `force_deploy` is selected, promotion updates
+Dokploy's `dockerImage` plus documented runtime env and requests deployment, API before worker. It refuses
+applications still configured with a Git source. Deploy-ref pushes and the
+legacy webhook CLI no longer trigger server/UI builds. API and worker requests
+are sequential, not an atomic rollout; inspect Dokploy completion before retrying
+or rolling back a partially successful deployment.
 
-- Trigger: pushes to `deploy/<env>/<component>` (or a manual workflow dispatch).
-- Action: sends `POST` requests to one or more configured deploy webhook URLs for that component.
-- Auth: adds Cloudflare Access service-token headers (`CF-Access-Client-Id` / `CF-Access-Client-Secret`).
-- Server deploy order: API first, then worker.
+Configure `DOKPLOY_API_URL` (the instance origin), secret `DOKPLOY_API_KEY`, and
+`DOKPLOY_<PRODUCTION|PREVIEW>_<API|WORKER|UI>_APPLICATION_ID` variables in
+`release-shared` for promotion, and in `production` / `preview` for manual
+deployment. Retain `CF_WEBHOOK_DEPLOY_CLIENT_ID` and
+`CF_WEBHOOK_DEPLOY_CLIENT_SECRET` when the API is behind Cloudflare Access.
+For each target environment, the application variables are
+`DOKPLOY_PRODUCTION_API_APPLICATION_ID`, `DOKPLOY_PRODUCTION_WORKER_APPLICATION_ID`,
+`DOKPLOY_PRODUCTION_UI_APPLICATION_ID`, or the corresponding
+`DOKPLOY_PREVIEW_API_APPLICATION_ID`, `DOKPLOY_PREVIEW_WORKER_APPLICATION_ID`,
+`DOKPLOY_PREVIEW_UI_APPLICATION_ID`. Both promotion and manual UI deployment need
+the matching `HAPPIER_PRODUCTION_SERVER_URL` / `HAPPIER_PREVIEW_SERVER_URL`
+variable in their selected GitHub environment; an absent production URL fails
+deployment instead of selecting the preview API.
+The API key needs application read, service update and deployment permissions.
+Public UI build variables belong in the publisher's `release-shared` environment:
+`POSTHOG_API_KEY`, `POSTHOG_HOST`, `SENTRY_DSN` and `REVENUE_CAT_STRIPE`.
+`HAPPIER_PRODUCTION_SERVER_URL` / `HAPPIER_PREVIEW_SERVER_URL` configure the UI
+at runtime through `DOKPLOY_UI_SERVER_URL`, which the adapter writes as
+`HAPPIER_WEBAPP_SERVER_URL`. Self-hosters set that container env directly.
 
-Configuration (recommended as GitHub *Environment* secrets/vars for `production` / `preview`):
+Before enabling this path, disable Dokploy Git auto-deployment for each selected
+application and switch its source to **Docker**, with registry `ghcr.io` and the
+publisher's exact image. Preserve its environment, domains, networks, health
+checks and mounts. Configure GHCR pull credentials in Dokploy if packages are
+private; CI never rewrites those credentials. Keep API routing on port 3005 and
+UI routing on 8080. Preserve migration ownership: the designated API runs
+migrations; workers use `RUN_MIGRATIONS=0`.
 
-- `CF_WEBHOOK_DEPLOY_CLIENT_ID`, `CF_WEBHOOK_DEPLOY_CLIENT_SECRET`
-- `DEPLOY_WEBHOOK_URL`: base URL (e.g. `https://ci.leecloud.ch/api/deploy/`)
-- Newline-separated webhook URL lists:
-  - `HAPPIER_UI_DEPLOY_WEBHOOKS`
-  - `HAPPIER_WEBSITE_DEPLOY_WEBHOOKS`
-  - `HAPPIER_DOCS_DEPLOY_WEBHOOKS`
-  - `HAPPIER_SERVER_API_DEPLOY_WEBHOOKS`
-  - `HAPPIER_SERVER_WORKER_DEPLOY_WEBHOOKS`
-  - `HAPPIER_CLI_DEPLOY_WEBHOOKS`
+Coordinate this operator switch with landing the workflow changes. Release server/UI
+promotion dispatches `deploy.yml` on `deploy/<environment>/<component>`, passing
+the publisher's exact `hosted_images` map, and waits for that run's conclusion.
+Only that deploy job reads environment-scoped Dokploy credentials. This keeps the
+production branch policy (`deploy/production/*`) intact even when release control
+runs from `dev`. The release App token needs Actions write permission to dispatch
+and observe the deploy run; secrets are not copied to `release-shared`.
+
+Direct pushes to server/UI deploy refs no longer start deployment. Resuming a
+failed promotion redeploys the exact map even if the ref already advanced; the
+same image can be deployed again. A manual recovery can also dispatch `deploy.yml`
+on the corresponding deploy ref with an explicit image map. Production fails
+when Dokploy is unconfigured; preview with no applications skips with a notice
+through the same adapter. The replaced webhook path is not an automatic fallback.
+Cancelling release control may leave its already dispatched deploy running;
+operators can inspect or cancel the linked deploy run in GitHub Actions.
+
+The adapter sets API/worker env `HAPPIER_SERVER_FLAVOR=full`,
+`HAPPIER_DB_PROVIDER=postgres`, `HAPPIER_SERVER_UI_REQUIRED=0`,
+`HAPPIER_SERVER_UI_DIR=` (empty), `HAPPIER_SOCKET_ADAPTER=redis-streams`, and
+`SERVER_ROLE=api` or `worker`. It retains the existing `DATABASE_URL`, `REDIS_URL`,
+`RUN_MIGRATIONS` and all other operator env. Set API `RUN_MIGRATIONS=1` and worker
+`RUN_MIGRATIONS=0` during the one-time source switch. No hosted-only image exists.
+
+For redeployment or rollback, use **DEPLOY — Deploy Branch** with the matching
+environment/component and an explicit `hosted_images` JSON map copied from the
+desired prior publication. This does not move deploy refs or reverse database
+migrations. Verify the running image digests, API health/version, worker queue
+processing and UI before accepting the rollout.
+
+Docs and website stay on Cloudflare by owner decision (2026-11-03), outside this
+API/worker/UI change. Existing legacy deploy-branch hooks remain separate. For those hooks,
+`DEPLOY_WEBHOOK_URL` is the base URL and `HAPPIER_DOCS_DEPLOY_WEBHOOKS` /
+`HAPPIER_WEBSITE_DEPLOY_WEBHOOKS` are newline-separated IDs or full URLs.
 
 Repository variables used for exact hosted-server completion proof:
 
@@ -804,12 +877,8 @@ Repository variables used for exact hosted-server completion proof:
 
 Each value must be the public `https://.../v1/version` endpoint for that
 environment. A selected server deployment fails release verification unless
-the endpoint reports the approved release `source_sha`; webhook acceptance alone
+the endpoint reports the approved release `source_sha`; deploy-request acceptance alone
 is not deployment completion.
-
-The `HAPPIER_*_DEPLOY_WEBHOOKS` values can be either:
-- webhook IDs (recommended), which will be called as `${DEPLOY_WEBHOOK_URL}/{id}`
-- full `https://…` URLs (supported for backwards compatibility)
 
 If you only need to move branches (no deploy/publish):
 

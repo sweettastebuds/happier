@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createServer, type Server } from 'node:http';
+import { mkdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { runScmCommand } from '@/scm/runtime';
 
 import { deriveBoxPublicKeyFromSeed } from '@happier-dev/protocol';
 import { RPC_METHODS } from '@happier-dev/protocol/rpc';
@@ -33,6 +36,8 @@ vi.mock('@/persistence', async (importOriginal) => {
 describe('daemon.directSessions.link.ensure (integration)', () => {
   const envKeys = [
     'HAPPIER_SERVER_URL',
+    'HAPPIER_LOCAL_SERVER_URL',
+    'HAPPIER_PUBLIC_SERVER_URL',
     'HAPPIER_WEBAPP_URL',
     'HAPPIER_HOME_DIR',
     'HAPPIER_CLAUDE_CONFIG_DIR',
@@ -44,10 +49,12 @@ describe('daemon.directSessions.link.ensure (integration)', () => {
 
   const sessionsByTag = new Map<string, any>();
   const sessionsById = new Map<string, any>();
+  let lastCreateBody: Record<string, unknown>;
 
   beforeEach(async () => {
     sessionsByTag.clear();
     sessionsById.clear();
+    lastCreateBody = {};
     envScope = createEnvKeyScope(envKeys);
     happyHomeDir = await createTempDir('happier-directSessions-linkEnsure-');
 
@@ -97,6 +104,7 @@ describe('daemon.directSessions.link.ensure (integration)', () => {
         const chunks: Buffer[] = [];
         for await (const c of req) chunks.push(Buffer.from(c));
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        lastCreateBody = body;
         const tag = String(body.tag ?? '');
 
         const existing = sessionsByTag.get(tag);
@@ -146,6 +154,8 @@ describe('daemon.directSessions.link.ensure (integration)', () => {
     }
 
     process.env.HAPPIER_SERVER_URL = `http://127.0.0.1:${address.port}`;
+    process.env.HAPPIER_LOCAL_SERVER_URL = process.env.HAPPIER_SERVER_URL;
+    delete process.env.HAPPIER_PUBLIC_SERVER_URL;
     process.env.HAPPIER_WEBAPP_URL = 'http://127.0.0.1:3000';
     process.env.HAPPIER_HOME_DIR = happyHomeDir;
     process.env.HAPPIER_CLAUDE_CONFIG_DIR = '/tmp';
@@ -219,12 +229,18 @@ describe('daemon.directSessions.link.ensure (integration)', () => {
       providerId: 'claude',
       remoteSessionId: 'remote_123',
       titleHint: 'Linked Claude Session',
+      sourceCreatedAtMs: 1_600_000_000_000,
+      sourceUpdatedAtMs: 1_700_000_000_000,
       directoryHint: '/tmp/project-a',
       source: { kind: 'claudeConfig', configDir: '/tmp', projectId: 'proj-a' },
     });
 
     expect(res.ok).toBe(true);
     expect(res.created).toBe(true);
+    expect(lastCreateBody).toMatchObject({
+      sourceCreatedAtMs: 1_600_000_000_000,
+      sourceUpdatedAtMs: 1_700_000_000_000,
+    });
     expect(typeof res.sessionId).toBe('string');
 
     const createdSession = Array.from(sessionsByTag.values())[0];
@@ -250,6 +266,37 @@ describe('daemon.directSessions.link.ensure (integration)', () => {
     expect(parsedMeta.data.directSessionV1.providerId).toBe('claude');
     expect(parsedMeta.data.directSessionV1.remoteSessionId).toBe('remote_123');
     expect(parsedMeta.data.directSessionV1.machineId).toBe('machine_1');
+  });
+
+  it('refreshes host-proven repository facts when a file-backed direct session is linked again', async () => {
+    const directory = join(happyHomeDir, 'repository');
+    await mkdir(directory);
+    expect((await runScmCommand({ bin: 'git', cwd: directory, args: ['init'] })).success).toBe(true);
+    const root = await runScmCommand({ bin: 'git', cwd: directory, args: ['rev-parse', '--show-toplevel'] });
+    expect(root.success).toBe(true);
+    const rootPath = root.stdout.replace(/\n$/, '');
+    const { ensureDirectSessionLink } = await import('@/api/directSessions/linking/ensureDirectSessionLink');
+    const credentials = await readCredentialsMock();
+    if (!credentials) throw new Error('Expected fixture credentials');
+    const request = {
+      credentials, machineId: 'local-machine', providerId: 'codex' as const,
+      remoteSessionId: 'repository-thread', source: { kind: 'codexHome' as const, home: 'user' as const },
+      directoryHint: directory,
+    };
+    const linked = await ensureDirectSessionLink(request);
+    const readMetadata = () => tryDecryptSessionMetadata({ credentials, rawSession: sessionsById.get(linked.sessionId) });
+    expect(readMetadata()).toMatchObject({ path: directory,
+      sessionRepositoryV1: { v: 1, machineId: 'local-machine', rootPath, worktreePath: rootPath } });
+
+    await rm(join(directory, '.git'), { recursive: true });
+    await ensureDirectSessionLink(request);
+    expect(readMetadata()).not.toHaveProperty('sessionRepositoryV1');
+    expect(readMetadata()?.path).toBe(directory);
+
+    expect((await runScmCommand({ bin: 'git', cwd: directory, args: ['init'] })).success).toBe(true);
+    const refreshed = await ensureDirectSessionLink(request);
+    expect(refreshed.sessionId).toBe(linked.sessionId);
+    expect(readMetadata()).toMatchObject({ sessionRepositoryV1: { v: 1, machineId: 'local-machine', rootPath, worktreePath: rootPath } });
   });
 
   it('persists codex backend affinity when linking a codex direct session', async () => {

@@ -25,8 +25,11 @@ import type { TrackedSession } from '../types';
 import { cleanupPidSessionResources } from '../sessions/cleanupPidSessionResources';
 import { createOnChildExited } from '../sessions/onChildExited';
 import { readSessionMarkerForPid } from '../sessionRegistry';
+import { readProcessRunState } from '../processRunState';
 import {
+  isTrackedSessionRunnerCurrent,
   isValidProcessCommandHash,
+  readTrackedSessionRunner,
   readSessionRunnerProcessIdentity as readSessionRunnerProcessIdentityDefault,
   storedProcessIdentityProvesPidReuse,
   type SessionRunnerProcessIdentity,
@@ -212,13 +215,24 @@ export function startDaemonHeartbeatLoop(params: Readonly<{
 
       // Prune stale sessions
       for (const [pid, tracked] of pidToTrackedSession.entries()) {
+        const runner = readTrackedSessionRunner(tracked);
         const isPidAlive = isPidAliveBestEffort(pid);
-        const currentIdentity = isPidAlive && (
-          isValidProcessCommandHash(tracked.processCommandHash)
-          || Boolean(tracked.processInstanceFingerprint)
+        if (isPidAlive && runner.pid !== pid) {
+          const runState = await readProcessRunState(runner.pid);
+          if (pidToTrackedSession.get(pid) !== tracked || !isTrackedSessionRunnerCurrent(tracked, runner)) continue;
+          if (runState === 'dead' || runState === 'zombie') {
+            await onChildExitedForPrune(pid, { reason: 'process-missing', code: null, signal: null });
+            continue;
+          }
+        }
+        // A still-running launcher has a different identity from its reported runner.
+        const currentIdentity = isPidAlive && runner.pid === pid && (
+          isValidProcessCommandHash(runner.processCommandHash)
+          || Boolean(runner.processInstanceFingerprint)
         )
           ? await readSessionRunnerProcessIdentityForHeartbeat({ pid }).catch(() => ({ kind: 'unknown' as const }))
           : undefined;
+        if (pidToTrackedSession.get(pid) !== tracked || !isTrackedSessionRunnerCurrent(tracked, runner)) continue;
         const pruneReason = getTrackedSessionHeartbeatPruneReason({
           isPidAlive,
           trackedSession: tracked,
@@ -337,6 +351,7 @@ export function startDaemonHeartbeatLoop(params: Readonly<{
       // Observe an already-published successor before constructing this heartbeat. The subsequent
       // owner-gated write closes the lock handoff race between this read and publication.
       const daemonState = await readDaemonState();
+      if (isShuttingDown?.() === true) return;
       if (daemonState && daemonState.pid !== process.pid) {
         logger.debug('[DAEMON RUN] Somehow a different daemon was started without killing us. We should kill ourselves.');
         requestShutdown('exception', 'A different daemon was started without killing us. We should kill ourselves.');
@@ -349,18 +364,10 @@ export function startDaemonHeartbeatLoop(params: Readonly<{
           return;
         }
         const updatedState: DaemonLocallyPersistedState = {
+          ...fileState,
           pid: process.pid,
           httpPort: controlPort,
-          startedAt: fileState.startedAt,
-          startedWithCliVersion: fileState.startedWithCliVersion,
-          startedWithPublicReleaseChannel: fileState.startedWithPublicReleaseChannel,
-          runtimeId: fileState.runtimeId,
-          startupSource: fileState.startupSource,
-          serviceLabel: fileState.serviceLabel,
-          machineId: fileState.machineId,
           lastHeartbeatAt: Date.now(),
-          daemonLogPath: fileState.daemonLogPath,
-          controlToken: fileState.controlToken,
         };
         if (!writeDaemonStateIfLockOwned(updatedState)) {
           requestShutdown('exception', 'Daemon lifecycle lock ownership changed before heartbeat publication.');

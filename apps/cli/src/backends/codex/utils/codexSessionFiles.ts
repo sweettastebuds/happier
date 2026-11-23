@@ -1,11 +1,11 @@
 import { readdirSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { resolveConfiguredCodexHome } from '@/backends/codex/utils/resolveConfiguredCodexHome';
 
 const CODEX_NATIVE_SEARCH_MAX_DEPTH = 8;
-const CODEX_ROLLOUT_SUFFIX_PATTERN = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl$/i;
+const CODEX_ROLLOUT_SUFFIX_PATTERN = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl(?:\.zst)?$/i;
 const CODEX_ROLLOUT_ID_PATTERN = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))?$/i;
 
 export type CodexRolloutFilename = Readonly<{
@@ -13,6 +13,31 @@ export type CodexRolloutFilename = Readonly<{
   threadId?: string;
   turnId?: string;
 }>;
+
+/** Physical rollout formats supported by Codex, including legacy noncanonical names. */
+export function isCodexRolloutFilePath(path: string): boolean {
+  return /\.jsonl(?:\.zst)?$/i.test(path);
+}
+
+/** Codex indexes the logical plain path even while the physical rollout is compressed. */
+export function resolveCodexLogicalRolloutPath(path: string): string {
+  return /\.jsonl\.zst$/i.test(path) ? path.slice(0, -4) : path;
+}
+
+/** Leave decoding and append-time materialization to Codex's native rollout owner. */
+export async function resolveExistingCodexRolloutPath(path: string): Promise<string | null> {
+  const plainPath = resolveCodexLogicalRolloutPath(path);
+  const candidates = isCodexRolloutFilePath(path) ? [plainPath, `${plainPath}.zst`] : [path];
+  for (const candidate of candidates) {
+    try {
+      if ((await stat(candidate)).isFile()) return candidate;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+    }
+  }
+  return null;
+}
 
 /** Parses all supported rollout suffixes and identifies UUID-based continuations. */
 export function parseCodexRolloutFilename(filePath: string): CodexRolloutFilename | null {
@@ -93,6 +118,7 @@ function compareDescending(a: string, b: string): number {
 export async function findCodexRolloutFileById(params: Readonly<{
   sessionsRoot: string;
   vendorResumeId: string;
+  includeCompressed?: boolean;
 }>): Promise<string | null> {
   async function walk(currentDir: string, depth: number): Promise<string | null> {
     if (depth > CODEX_NATIVE_SEARCH_MAX_DEPTH) return null;
@@ -100,6 +126,7 @@ export async function findCodexRolloutFileById(params: Readonly<{
     const subDirectoryNames: string[] = [];
     try {
       const entries = await readdir(currentDir, { withFileTypes: true });
+      const fileNames = new Set(entries.filter(entry => entry.isFile()).map(entry => String(entry.name)));
       for (const entry of entries) {
         if (entry.isSymbolicLink()) continue;
         const entryName = String(entry.name);
@@ -108,8 +135,10 @@ export async function findCodexRolloutFileById(params: Readonly<{
           continue;
         }
         if (!entry.isFile()) continue;
+        if (params.includeCompressed === false && entryName !== resolveCodexLogicalRolloutPath(entryName)) continue;
         if (isMatchingCodexRolloutFileName(entryName, params.vendorResumeId)) {
-          return join(currentDir, entryName);
+          const plainName = resolveCodexLogicalRolloutPath(entryName);
+          return join(currentDir, fileNames.has(plainName) ? plainName : entryName);
         }
       }
     } catch {
@@ -134,6 +163,7 @@ export async function findCodexRolloutFileById(params: Readonly<{
 export function findCodexRolloutFileByIdSync(params: Readonly<{
   sessionsRoot: string;
   vendorResumeId: string;
+  includeCompressed?: boolean;
 }>): string | null {
   function walk(currentDir: string, depth: number): string | null {
     if (depth > CODEX_NATIVE_SEARCH_MAX_DEPTH) return null;
@@ -141,6 +171,7 @@ export function findCodexRolloutFileByIdSync(params: Readonly<{
     const subDirectoryNames: string[] = [];
     try {
       const entries = readdirSync(currentDir, { withFileTypes: true });
+      const fileNames = new Set(entries.filter(entry => entry.isFile()).map(entry => String(entry.name)));
       for (const entry of entries) {
         if (entry.isSymbolicLink()) continue;
         const entryName = String(entry.name);
@@ -149,8 +180,10 @@ export function findCodexRolloutFileByIdSync(params: Readonly<{
           continue;
         }
         if (!entry.isFile()) continue;
+        if (params.includeCompressed === false && entryName !== resolveCodexLogicalRolloutPath(entryName)) continue;
         if (isMatchingCodexRolloutFileName(entryName, params.vendorResumeId)) {
-          return join(currentDir, entryName);
+          const plainName = resolveCodexLogicalRolloutPath(entryName);
+          return join(currentDir, fileNames.has(plainName) ? plainName : entryName);
         }
       }
     } catch {

@@ -250,6 +250,57 @@ function resolveDrop(params: Readonly<{ sourceRowId: string; y: number; folderSo
 }
 
 describe('applySessionListTreeDropOperation', () => {
+    it('commits a pinned reorder without touching the underlying folder or project order', async () => {
+        const tree = buildSessionListTreeRows({ items: [
+            { type: 'header', title: 'Pinned', headerKind: 'pinned', groupKey: PINNED_GROUP_KEY_V1 },
+            sessionItem({ id: 'first', groupKey: PINNED_GROUP_KEY_V1, groupKind: 'pinned', folderId: null, depth: 0 }),
+            sessionItem({ id: 'second', groupKey: PINNED_GROUP_KEY_V1, groupKind: 'pinned', folderId: 'folder-a', depth: 1 }),
+        ] });
+        const setSessionFolderAssignment = vi.fn(async () => undefined);
+        const setSessionListGroupOrderV1 = vi.fn();
+        const applied = await applySessionListTreeDropOperation({
+            tree,
+            source: buildSessionListDragSource({ tree, sourceRowId: treeRowId.session('server-a', 'second') }),
+            result: { instruction: {
+                kind: 'reorder-before', targetId: treeRowId.session('server-a', 'first'),
+                containerId: PINNED_GROUP_KEY_V1, parentId: null, depth: 0,
+            }, visual: { kind: 'none' } },
+            context: {
+                sessionFoldersV1: folders(),
+                sessionListGroupOrderV1: {
+                    [PINNED_GROUP_KEY_V1]: ['server-a:first', 'server-a:second'],
+                    'project-a:folder:folder-a': ['server-a:second'],
+                },
+                now: () => 100, setSessionFoldersV1: vi.fn(),
+                setSessionListGroupOrderV1, setSessionFolderAssignment,
+            },
+        });
+        expect(applied.ok).toBe(true);
+        expect(setSessionFolderAssignment).not.toHaveBeenCalled();
+        expect(setSessionListGroupOrderV1.mock.calls).toEqual([[{
+            [PINNED_GROUP_KEY_V1]: ['server-a:second', 'server-a:first'],
+        }]]);
+    });
+
+    it('rejects a direct cross-checkout folder assignment beneath a shared repository heading', async () => {
+        const linked: SessionFolderWorkspaceRefV1 = { ...workspaceA, rootPath: '/worktrees/topic' };
+        const tree = buildSessionListTreeRows({ items: [
+            projectHeader('repository'),
+            folderHeader({ id: 'folder-a', groupKey: 'main-folder', depth: 0 }),
+            { ...sessionItem({ id: 'linked-root', groupKey: 'repository', folderId: null, depth: 0 }), workspace: linked },
+        ] });
+        const setSessionFolderAssignment = vi.fn(async () => undefined);
+        const applied = await applySessionListTreeDropOperation({
+            tree,
+            source: buildSessionListDragSource({ tree, sourceRowId: treeRowId.session('server-a', 'linked-root') }),
+            result: { instruction: { kind: 'nest-into', targetId: treeRowId.folder('folder-a'), containerId: treeRowId.folder('folder-a'), parentId: treeRowId.folder('folder-a'), depth: 1 }, visual: { kind: 'none' } },
+            context: { sessionFoldersV1: folders(), sessionListGroupOrderV1: {}, now: () => 100,
+                setSessionFoldersV1: vi.fn(), setSessionListGroupOrderV1: vi.fn(), setSessionFolderAssignment },
+        });
+        expect(applied.ok).toBe(false);
+        expect(setSessionFolderAssignment).not.toHaveBeenCalled();
+    });
+
     it('commits same-container session sibling reorder in custom mode', async () => {
         const { tree, source, result } = resolveRootSessionSiblingDrop();
         const setSessionFolderAssignment = vi.fn(async () => undefined);

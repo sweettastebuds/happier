@@ -627,6 +627,7 @@ export const it: TranslationStructure = {
             composerFocus: 'Metti a fuoco il compositore',
             composerSendImmediate: 'Invio alternativo (coda / indirizza)',
             composerSendInterrupt: 'Interrompi e invia',
+            composerSendAlternateAfterSend: "Invia e iniziane un’altra / apri",
             composerSendPending: 'Invia alla coda in sospeso',
             commandPaletteOpen: 'Apri palette comandi',
             modeCycle: 'Cambia modalità',
@@ -780,6 +781,7 @@ export const it: TranslationStructure = {
     details: "Dettagli",
     fieldStatus: "Stato",
     fieldAction: "Azione",
+    fieldFailureReason: "Motivo dell’errore",
     approve: "Approva",
     reject: "Rifiuta",
     loadError: "Impossibile caricare l'approvazione.",
@@ -1272,6 +1274,7 @@ export const it: TranslationStructure = {
     send: "Invia",
     attach: "Allega",
     addImage: "Aggiungi immagine",
+    takePhoto: "Scatta foto",
     addFile: "Aggiungi file",
     linkFile: "Collega file",
     files: "File",
@@ -2913,7 +2916,7 @@ export const it: TranslationStructure = {
           renewal: "Rinnovo",
           renewalOn: "Attivo",
           renewalOff: "Disattivo",
-          renewalUnknown: "Sconosciuto",
+          active: "Attivo",
           renews: ({ date }: { date: string }) => `Si rinnova il ${date}`,
           ends: ({ date }: { date: string }) => `Termina il ${date}`,
           renewsInDays: ({ days }: { days: number }) => `Si rinnova tra ${days} ${days === 1 ? 'giorno' : 'giorni'}`,
@@ -3163,6 +3166,7 @@ export const it: TranslationStructure = {
       usageCount: ({ used, limit }: { used: number; limit: number }) =>
         `${used}/${limit} usato`,
       duration: {
+        seconds: ({ seconds }: { seconds: number }) => `${seconds} s`,
         now: "ora",
         outdated: "non aggiornato",
         daysHours: ({ days, hours }: { days: number; hours: number }) =>
@@ -3177,6 +3181,12 @@ export const it: TranslationStructure = {
       refreshA11y: "Aggiorna utilizzo e limiti",
       usageCaption: "Utilizzo",
       resetsCaption: "Ripristini quota",
+      credits: {
+        title: "Crediti",
+        balance: ({ balance }: { balance: string }) => `${balance} crediti`,
+        spent: "Esauriti",
+        includedUsed: "Limiti inclusi esauriti · crediti disponibili",
+      },
       usedDetail: ({ used, limit }: { used: string; limit: string }) => `${used}/${limit} usati`,
       capacity: ({ percent }: { percent: number }) => `${percent}% di capacità`,
       memberEnabledLabel: "Abilitato nel Pool",
@@ -3211,6 +3221,11 @@ export const it: TranslationStructure = {
         confirmMessage: "Applica un ripristino dell'utilizzo per recuperare subito la quota. Non può essere annullato.",
         confirmCta: "Usa ripristino",
       },
+    },
+    requestErrors: {
+      unreachable: "Impossibile connettersi al server Happier. Controlla la rete o la connessione VPN e riprova.",
+      timeout: "Il server Happier non ha risposto in tempo.",
+      serverHttp: ({ status }: { status: string }) => `Il server Happier ha restituito un errore (${status}). Riprova tra un attimo.`,
     },
     oauthPaste: {
       invalidConfig: "Configurazione del servizio connesso non valida.",
@@ -3255,7 +3270,11 @@ export const it: TranslationStructure = {
       },
       errors: {
         missingState: "Stato OAuth mancante nell’URL di reindirizzamento.",
-        stateMismatch: "Stato OAuth non corrispondente.",
+        stateMismatch: "Questa risposta di autorizzazione non corrisponde al tentativo corrente. Avvia una nuova autorizzazione.",
+        rejected: ({ reason }: { reason: string }) => `Il provider ha rifiutato l'autorizzazione: ${reason}`,
+        rejectedGeneric: "Il provider ha rifiutato l'autorizzazione.",
+        exchangeOutcomeUnknown: "Non è stato possibile confermare il completamento dell’accesso. Controlla gli account connessi e, se necessario, accedi di nuovo con un nuovo codice.",
+        responseKept: "La richiesta non è stata inviata. Controlla la connessione, quindi premi Continua per usare la risposta che hai già incollato.",
       },
     },
     oauthEmbedded: {
@@ -3651,6 +3670,8 @@ export const it: TranslationStructure = {
         `Saltati ${count} ${plural({ count, singular: "file", plural: "file" })} che superano la dimensione massima dell’allegato.`,
       noClipboardImageTitle: "Nessuna immagine negli appunti",
       noClipboardImageBody: "Copia un'immagine e incollala come allegato.",
+      cameraPermissionDeniedTitle: "Accesso alla fotocamera necessario",
+      cameraPermissionDeniedBody: "Consenti l'accesso alla fotocamera nelle impostazioni del dispositivo per scattare una foto.",
     },
   },
 
@@ -3951,7 +3972,7 @@ export const it: TranslationStructure = {
     trayOpenInHappier: 'Apri in Happier',
     traySettings: 'Impostazioni…',
     trayStartAtLogin: 'Avvia all’accesso',
-    trayStopAndQuit: 'Arresta i servizi in background ed esci',
+    trayStopAndQuit: 'Esci da Happier (arresta i servizi in background)',
     trayStart: 'Avvia',
     trayRestart: 'Riavvia',
     trayStop: 'Arresta',
@@ -3967,6 +3988,7 @@ export const it: TranslationStructure = {
     trayStopAllConfirmBody: 'Le sessioni degli agenti in esecuzione su questo computer termineranno, e telefono e browser non potranno raggiungerlo finché non riapri Happier.',
     trayStopConfirmAction: 'Arresta',
     trayActionFailedTitle: 'Non è andato a buon fine',
+    trayQuitWaitForSystemTasks: "Happier sta ancora configurando o rimuovendo componenti. Attendi il completamento, poi prova di nuovo a uscire.",
     trayLoginItemFailed: 'Impossibile aggiornare l’elemento di login di Happier',
     traySessions: ({ count }: { count: string }) => `Sessioni: ${count}`,
     closeStopTitle: 'Ci sono ancora sessioni agente in corso',
@@ -4328,6 +4350,39 @@ export const it: TranslationStructure = {
     },
 
   settingsProviders: {
+        sessionRetention: {
+            invalidSettings: "Correggi il JSON delle impostazioni Claude e riconnetti il computer per riprovare.",
+            permissionDenied: "Consenti l’accesso al file delle impostazioni Claude e riconnetti il computer.",
+            writeFailed: "Impossibile salvare le impostazioni Claude. Controlla l’accesso al file e riconnetti il computer.",
+            managedUnreadable: "Impossibile leggere le impostazioni dell’organizzazione. Controlla i permessi in Claude prima di modificare la conservazione.",
+            group: "Gruppo",
+            title: "Conservazione sessioni",
+            footer: "Configura la conservazione di Claude a livello utente su tutte le tue macchine. Le impostazioni del progetto, dell’organizzazione o di avvio esplicito possono sostituirla.",
+            policy: "Conserva cronologia locale",
+            unmanaged: "Mantieni impostazioni esistenti",
+            unmanagedHint: "Interrompi la gestione; le modifiche precedenti restano.",
+            providerDefault: "Predefinito Claude",
+            providerDefaultHint: "Rimuovi il periodo utente e usa quello predefinito di Claude.",
+            year: "1 anno (365 giorni)",
+            century: "100 anni (36.500 giorni)",
+            custom: "Giorni personalizzati",
+            customDays: "Numero di giorni",
+            invalidDays: "Inserisci un numero intero positivo di giorni.",
+            machines: "Stato dei computer",
+            noMachines: "I computer associati appariranno qui.",
+            native: "Claude nativo",
+            profile: "Profilo",
+            applied: "Configurato",
+            unmanagedStatus: "Non gestito",
+            pending: "In attesa del computer",
+            unknown: "Aggiorna il daemon per vedere lo stato",
+            error: "Impossibile applicare la conservazione",
+            managed: "Le regole dell’organizzazione possono prevalere sulla conservazione",
+            offline: "Offline · ultimo stato confermato",
+            confirmTitle: "Ridurre la conservazione Claude?",
+            confirmBody: "Un periodo più breve può consentire a Claude di eliminare la vecchia cronologia locale. La cronologia eliminata non è recuperabile. Le impostazioni del progetto o dell’organizzazione possono prevalere.",
+            confirmAction: "Applica conservazione",
+        },
         title: "Impostazioni del provider IA",
         entrySubtitle: "Configura opzioni specifiche del provider",
         footer:
@@ -5215,6 +5270,8 @@ export const it: TranslationStructure = {
       hiddenInactiveSessionsEmptyStateSubtitle: "Le sessioni inattive sono nascoste in questo elenco",
       hiddenInactiveSessionsSectionTitle: "Sessioni inattive",
       hiddenInactiveSessionsSectionSubtitle: "Nascoste nell'elenco principale perché lì vengono mostrate solo le chat attive",
+    sessionListGroupGitWorktrees: "Raggruppa i worktree Git per repository",
+    sessionListGroupGitWorktreesSubtitle: "Mantieni insieme le sessioni dello stesso repository. Disattiva per raggruppare per directory.",
     sessionListActiveGrouping: "Raggruppamento sessioni attive",
     sessionListActiveGroupingSubtitle:
       "Scegli come raggruppare le sessioni attive nella barra laterale",
@@ -5786,9 +5843,10 @@ export const it: TranslationStructure = {
         overloadAttempt: ({ attempt }: { attempt: number }) => `Tentativo ${attempt}`,
       title: "Limite di utilizzo raggiunto",
       readyTitle: "Limite di utilizzo reimpostato",
-      resetBody: ({ time }: { time: string }) =>
-        `Questo provider chiede alla sessione di attendere fino a ${time} prima di continuare.`,
+      resetBody: ({ time, duration }: { time: string; duration?: string }) =>
+        `Questo provider chiede alla sessione di attendere fino a ${time}${duration ? ` (${duration})` : ''} prima di continuare.`,
       genericBody: "Questo provider chiede alla sessione di attendere prima di continuare.",
+      stoppedBody: "Il recupero automatico si è interrotto e non riproverà da solo. Riprova qui sotto.",
       resetCreditBody: ({ count }: { count: number }) =>
         `${count} ${count === 1 ? "reset di utilizzo disponibile" : "reset di utilizzo disponibili"}.`,
       resetCreditExpiresBody: ({ count, time }: { count: number; time: string }) =>
@@ -6377,6 +6435,7 @@ export const it: TranslationStructure = {
 	          waitingForRuntimeActivityNotice: 'In attesa che termini l’attività del runtime',
 	          runtimeActivityUnknownNotice: 'In attesa dello stato di attività del runtime',
 	          waitingForRuntimeNotice: 'In attesa che il runtime si riconnetta',
+	          steerUnavailableWaitingForTurnNotice: 'Non può essere inserito in questo turno ora · verrà inviato alla fine',
 	          nonSteerableNotice: "Il turno corrente non può accettare inserimenti dopo questo cambio di modalità. Verrà eseguito dopo, oppure usa Invia ora per interrompere.",
 	          steerBlockedTerminalDraftNotice: 'In attesa: una bozza nel compositore del terminale blocca la consegna. Cancellala nel terminale o interrompi il turno.',
 	          clearTerminalComposer: {
@@ -6883,8 +6942,9 @@ export const it: TranslationStructure = {
   },
 
   sessionDrafts: {
-    sectionTitle: 'Bozze', badge: 'Bozza', untitled: 'Bozza senza titolo', continueEditing: 'Continua a modificare', startAnother: 'Iniziane un’altra',
-    status: { offline: 'Non in linea', syncing: 'Sincronizzazione', conflict: 'Conflitto', machineUnavailable: 'Computer non disponibile', attachmentNeedsAttention: 'Allegato da controllare', startInterrupted: 'Avvio interrotto' },
+    sectionTitle: 'Bozze', badge: 'Bozza', untitled: 'Bozza senza titolo', continueEditing: 'Continua a modificare', startAnother: 'Iniziane un’altra', startedOpen: "Sessione avviata · Apri",
+    status: { offline: 'Non in linea', syncing: 'Sincronizzazione', conflict: 'Conflitto', machineUnavailable: 'Computer non disponibile', attachmentNeedsAttention: 'Allegato da controllare', starting: 'Avvio in corso', startFailed: 'Avvio non riuscito' },
+    error: { title: 'Errore della bozza', storageDescription: 'Non è stato possibile salvare questa bozza su questo dispositivo. Copia il testo in un posto sicuro prima di uscire; il salvataggio verrà ritentato alla prossima modifica.', encryptionDescription: "Questo dispositivo non è riuscito a sincronizzare la bozza.", showDetailsHint: 'Mostra perché questa bozza ha un errore' },
     new: { action: 'Nuova bozza' }, delete: { action: 'Elimina bozza', confirmTitle: 'Eliminare la bozza?', confirmDescription: 'Questa bozza verrà rimossa dai tuoi dispositivi.' },
     conflict: { title: 'Conflitto della bozza', description: 'Questo campo è cambiato su un altro dispositivo.', mine: 'Su questo dispositivo', synced: 'Sincronizzato', useSynced: 'Usa sincronizzato', keepDevice: 'Mantieni dispositivo', copyMine: 'Copia il mio', copied: 'Copiato', copyFailed: 'Impossibile copiare', field: { text: 'Testo', mentions: 'Menzioni', attachments: 'Allegati', recipient: 'Destinatario', agentContinuation: 'Continuazione agente', executionRunDelivery: 'Consegna esecuzione' } },
   },
@@ -7281,8 +7341,12 @@ export const it: TranslationStructure = {
   },
 
   agentInput: {
+      keepKeyboard: { label: "Tieni aperta la tastiera dopo l’invio" },
+      historyPosition: ({ index, total }: { index: number; total: number }) => `${index} di ${total}`,
       sendOptions: {
           title: "Opzioni di invio",
+          sendAndStartAnother: "Invia e iniziane un’altra",
+          sendAndOpen: "Invia e apri la sessione",
           queue: "Accoda",
           hint: "Tieni premuto per scegliere come inviare",
       },
@@ -7700,6 +7764,7 @@ export const it: TranslationStructure = {
         dismiss: 'Ignora la domanda',
         dismissed: 'Domanda ignorata',
         submissionFailures: {
+            unconfirmed: "Happier non ha potuto confermare la tua risposta. Riprova oppure apri il terminale Claude per verificarla.",
             update: "Aggiorna Happier CLI e riprova.",
             reconnect: "Riconnetti questa sessione e riprova.",
             retry: "La risposta non è stata accettata. Controllala e riprova.",
@@ -8666,6 +8731,7 @@ export const it: TranslationStructure = {
 settingsSession: {
     terminalHostTitle: 'Host terminale per le nuove sessioni',
     terminalHostNone: 'Nessun host terminale',
+    newSessionAfterSend: { title: "Dopo l’invio", footer: "Scegli cosa succede quando invii dall’editor di nuova sessione. Tieni premuto Invia per scegliere l’altra opzione per un solo messaggio.", openTitle: "Apri la sessione", openSubtitle: "Vai alla sessione appena si avvia.", startAnotherTitle: "Resta e iniziane un’altra", startAnotherSubtitle: "Continua l’avvio in background e apri una nuova bozza." },
     newSessionDraftEntry: {
         title: 'Bozze di nuova sessione',
         footer: 'Scegli se Nuova sessione continua la bozza di questo dispositivo o ne apre una nuova.',
@@ -8839,6 +8905,10 @@ settingsSession: {
           resetHiddenSubtitle: 'Cancella i banner nascosti su questo dispositivo.',
       },
       inputBehavior: {
+          keepFocusTitle: "Mantieni l’editor attivo dopo l’invio",
+          keepFocusSubtitle: "Resta nel campo del messaggio per scrivere subito il successivo.",
+          typeToFocusTitle: "Scrivi da qualsiasi punto",
+          typeToFocusSubtitle: "Inizia a digitare fuori da un campo di testo per passare al campo del messaggio.",
           title: 'Comportamento dell\'immissione',
           footer: 'Configura Invio con Enter e il comportamento della cronologia dei messaggi.',
           enterToSendEnabledNativeSubtitle: 'Premi Invio per inviare',
@@ -8865,16 +8935,17 @@ settingsSession: {
           manualSubtitle: "Mantieni sempre i messaggi in coda finché non riprendi la sessione.",
         },
         title: "Invio messaggi",
-        footer:
-          "Controlla cosa succede quando invii un messaggio mentre l'agente è in esecuzione.",
-        queueInAgentTitle: "Accoda nell'agente (attuale)",
-        queueInAgentSubtitle:
-          "Scrivi subito nella trascrizione; l'agente elabora quando è pronto.",
-        interruptTitle: "Interrompi e invia",
-        interruptSubtitle: "Interrompi il turno corrente, poi invia subito.",
-        pendingTitle: "In attesa finché pronto",
-        pendingSubtitle:
-          "Mantieni i messaggi in una coda in attesa; l'agente li prende quando è pronto.",
+        footer: 'Scegli cosa succede quando invii un messaggio mentre l’agente lavora.',
+        busySend: {
+          addToTurnTitle: 'Inserisci nel turno corrente',
+          addToTurnSubtitle: 'L’agente lo legge subito e continua a lavorare, come scrivere nel suo terminale. Se non può accettarlo a metà turno, il messaggio attende in In sospeso fino alla fine del turno.',
+          waitForTurnTitle: 'Accoda fino alla fine del turno',
+          waitForTurnSubtitle: 'Tiene il messaggio in In sospeso, dove puoi modificarlo o riordinarlo, e lo invia a fine turno.',
+          interruptTitle: 'Interrompi e invia',
+          interruptSubtitle: 'Ferma ciò che l’agente sta facendo e invia subito il messaggio.',
+        },
+        inactiveSessionsTitle: 'Sessioni inattive',
+        inactiveSessionsFooter: 'Si applica quando invii a una sessione il cui agente si è fermato o la cui macchina è offline.',
         pendingDrainModeTitle: "Elaborazione della coda in attesa",
         pendingDrainModeFooter:
           "Scegli se l'agente prende un messaggio per ogni punto di disponibilità o raggruppa tutta la coda in attesa.",
@@ -8896,17 +8967,6 @@ settingsSession: {
           afterRuntimeIdleTitle: "Quando il runtime è inattivo",
           afterRuntimeIdleSubtitle:
             "Mantieni i messaggi in attesa finché l'attività runtime tracciata è ancora attiva.",
-        },
-        busySteerPolicyTitle: "Quando l'agente è occupato (con steering)",
-        busySteerPolicyFooter:
-          "Se l'agente supporta lo steering in corso, scegli se i messaggi devono fare steering subito o passare prima in In attesa.",
-        busySteerPolicy: {
-          steerImmediatelyTitle: "Steering immediato",
-          steerImmediatelySubtitle:
-            "Invia subito e fai steering del turno corrente (senza interruzione).",
-          queueForReviewTitle: "Accoda in In attesa",
-          queueForReviewSubtitle:
-            "Metti i messaggi prima in In attesa; inviali dopo con \"Guida ora\".",
         },
         nonSteerablePromptTitle: 'Quando un messaggio non può guidare il turno attivo',
         nonSteerablePromptFooter: 'Le modifiche alla modalità permessi e /clear o /compact non possono essere applicate a metà turno. Scegli cosa fa Happier con questi messaggi mentre l\'agente è occupato.',
@@ -8951,6 +9011,8 @@ settingsSession: {
         customResumePromptPlaceholder: "Continua da dove eri rimasto.",
       },
       providerUsageGauge: {
+          numberTitle: "Numero al centro degli anelli",
+          numberSubtitle: "Scegli il limite per il numero negli anelli. Se non è disponibile, viene usato quello più restrittivo.",
         title: "Uso del provider",
         footer:
           "Scegli gli indicatori del compositore per tutti gli account. Rispettano i limiti selezionati in ogni pool. I preferiti aggiungono indicatori per l’account attivo.",
@@ -11174,7 +11236,15 @@ settingsSession: {
     },
     cliPath: {
       title: "Terminale",
-      footer: "Happier Desktop aggiunge o rimuove solo le voci PATH che ha creato; quelle scritte dall'installer della shell restano intatte.",
+      footer: "Happier Desktop modifica solo le voci PATH che ha creato; quelle del programma di installazione shell restano invariate.",
+      cleanupTitle: "Rimuovi componenti Desktop",
+      cleanupSubtitle: "Rimuovi la riga di comando e i servizi di Desktop, poi esci.",
+      cleanupConfirmTitle: "Rimuovere i componenti Desktop e uscire?",
+      cleanupConfirmBody: "Questa azione rimuove i file della riga di comando, le voci PATH e i servizi di Desktop quando nessun’altra app Desktop ne ha bisogno. I componenti condivisi o installati da te vengono conservati, così come la cronologia delle sessioni e i dati dell’account. I servizi rimossi vengono arrestati, il che può interrompere le sessioni in corso e l’accesso remoto.\n\nDesktop si chiuderà dopo la pulizia. Rimuovi poi l’app tramite il sistema operativo; su macOS o Linux portatile, rimuovi il pacchetto o il file dell’app. Riaprendo Desktop, i componenti potrebbero essere configurati di nuovo.",
+      cleanupConfirmAction: "Rimuovi componenti ed esci",
+      cleanupBusy: "Rimozione dei componenti Desktop…",
+      cleanupFailed: "La pulizia non è terminata. Riprova.",
+      cleanupQuitFailed: "La pulizia è terminata, ma Desktop non è riuscito a chiudersi. Chiudi l’app prima di rimuoverla.",
       addTitle: "Aggiungi happier al PATH",
       addSubtitle: "Rendi disponibile il comando happier nei nuovi terminali.",
       removeTitle: "Rimuovi happier dal PATH",
@@ -11283,11 +11353,16 @@ settingsSession: {
   },
 
   message: {
+    provenanceFrom: ({ source }: { source: string }) => `Da ${source}`,
+    provenanceSession: 'Sessione',
     sessionReferenceUnavailable: "Sessione non disponibile",
     sessionReferenceOpen: ({ name }: { name: string }) => `Apri la sessione ${name}`,
     switchedToMode: ({ mode }: { mode: string }) =>
       `Passato alla modalità ${mode}`,
     discarded: "Scartato",
+    readAloudA11y: "Leggi ad alta voce",
+    stopReadAloudA11y: "Interrompi la lettura ad alta voce",
+    readAloudFailed: "Impossibile leggere questo messaggio ad alta voce. Controlla le impostazioni vocali.",
     recoveredHistory: "Cronologia recuperata",
     unknownEvent: "Evento sconosciuto",
     contextCompactionStarted: "Compattazione del contesto...",
@@ -11336,7 +11411,7 @@ settingsSession: {
     sessionRunningLocally:
       "Questa sessione è in esecuzione localmente su questo computer. Puoi passare a remoto per controllarla dall’app.",
     sessionRunningLocallyAndRemotely:
-      "Questa sessione è collegata localmente in OpenCode ed è ancora controllabile dall’app.",
+      "Questa sessione è collegata localmente ed è ancora controllabile dall’app.",
     switchingToRemote: "Passaggio alla modalità remota…",
     switchToRemote: "Passa a remoto",
     detachLocalTerminal: "Scollega terminale",
@@ -11416,6 +11491,13 @@ settingsSession: {
       codeCopied: "Codice copiato",
       copyFailed: "Copia non riuscita",
       mermaidRenderFailed: "Impossibile renderizzare il diagramma mermaid",
+      table: {
+          open: "Apri tabella",
+          copyCsv: "Copia come CSV",
+          copyMarkdown: "Copia come Markdown",
+          csvLabel: "CSV",
+          viewerTitle: "Tabella",
+      },
       diffLabel: "Differenze",
       codeLabel: "Codice",
 

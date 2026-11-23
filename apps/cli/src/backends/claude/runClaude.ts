@@ -46,6 +46,7 @@ import { applyStartupMetadataUpdateToSession, buildModelOverride, buildPermissio
 import { initializeRuntimeOverridesSynchronizer } from '@/agent/runtime/runtimeOverridesSynchronizer';
 import { createBaseSessionForAttach } from '@/agent/runtime/createBaseSessionForAttach';
 import { createSessionMetadata } from '@/agent/runtime/createSessionMetadata';
+import { readSessionTranscriptStorage } from '@/agent/runtime/readSessionTranscriptStorage';
 import { resolveClaudeConfigDirEnvOverlay } from './utils/resolveClaudeConfigDirEnvOverlay';
 import { readSessionAttachMetadataIdentityPolicyFromEnv } from '@/agent/runtime/readSessionAttachMetadataIdentityPolicyFromEnv';
 import { hashClaudeEnhancedModeForQueue } from '@/backends/claude/remote/modeHash';
@@ -369,6 +370,7 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
 
     const { state, metadata } = createSessionMetadata({
         flavor: 'claude',
+        transcriptStorage: existingSessionId ? undefined : readSessionTranscriptStorage(),
         nativeAgentEnvironment: resolveClaudeConfigDirEnvOverlay(process.env),
         machineId,
         directory: workingDirectory,
@@ -860,6 +862,7 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
         // (cached, best-effort) and carried on the mode so spawn-time resolution and launch-option
         // hashing both see the same value instead of reading a cache at hash time.
         const modelEffortTracker = createClaudeModelEffortLevelsTracker({
+            cwd: workingDirectory,
             resolveTimeoutMs: () => resolveClaudeHelpProbeTimeoutMs(),
             accountSettings: options.accountSettings ?? null,
         });
@@ -868,6 +871,7 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
         let currentFallbackModel: string | undefined = undefined; // Track current fallback model
         let currentCustomSystemPrompt: string | undefined = undefined; // Track current custom system prompt
         let currentAppendSystemPrompt: string | undefined = resolveInitialClaudeSystemPromptText({
+            runtimeModeKind: sessionRuntimeModeKind,
             existingSessionId,
             defaultSystemPromptText,
         }); // Track current append system prompt
@@ -1062,6 +1066,7 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
 
         const baseQueuedText = structuredRouting?.queuedText ?? message.content.text;
         const deliveryAttribution = {
+            providerPromptMeta: message.meta,
             userMessageSeq: deliveryInfo?.seq ?? null,
             userMessageLocalId: message.localId ?? null,
             providerAcceptancePending: deliveryInfo?.providerAcceptancePending === true,
@@ -1539,6 +1544,7 @@ async function runClaudeLocalFastStart(credentials: Credentials, options: StartO
     let currentReasoningEffortUpdatedAt = 0;
     // See the sibling runtime path above: tiers travel on the mode so hashing stays pure.
     const modelEffortTracker = createClaudeModelEffortLevelsTracker({
+        cwd: workingDirectory,
         resolveTimeoutMs: () => resolveClaudeHelpProbeTimeoutMs(),
         accountSettings: options.accountSettings ?? null,
     });
@@ -1551,6 +1557,7 @@ async function runClaudeLocalFastStart(credentials: Credentials, options: StartO
     const seedInitialAppendSystemPrompt = (defaultSystemPromptText?: string | null): void => {
         if (currentAppendSystemPromptSeeded) return;
         currentAppendSystemPrompt = resolveInitialClaudeSystemPromptText({
+            runtimeModeKind: sessionRuntimeModeKind,
             existingSessionId,
             defaultSystemPromptText,
         });
@@ -1698,6 +1705,7 @@ async function runClaudeLocalFastStart(credentials: Credentials, options: StartO
 
                 const { state, metadata } = createSessionMetadata({
                     flavor: 'claude',
+                    transcriptStorage: existingSessionId ? undefined : readSessionTranscriptStorage(),
                     nativeAgentEnvironment: resolveClaudeConfigDirEnvOverlay(process.env),
                     machineId,
                     directory: workingDirectory,
@@ -1989,6 +1997,7 @@ async function runClaudeLocalFastStart(credentials: Credentials, options: StartO
                     }, installedRuntimeCapabilities);
                     const baseQueuedText = structuredRouting?.queuedText ?? message.content.text;
                     const deliveryAttribution = {
+                        providerPromptMeta: message.meta,
                         userMessageSeq: deliveryInfo?.seq ?? null,
                         userMessageLocalId: message.localId ?? null,
                         providerAcceptancePending: deliveryInfo?.providerAcceptancePending === true,

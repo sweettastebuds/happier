@@ -41,6 +41,7 @@ import {
 } from './permissionPrivilege.js';
 import type { ActionsSettingsV1 } from './actionSettings.js';
 import { readPendingLocalId } from '../sessionMessages/pendingLocalId.js';
+import { SessionMessageProvenanceV1Schema, type SessionMessageProvenanceV1 } from '../sessionMessages/sessionMessageProvenance.js';
 import type { ReviewStartInput } from '../reviews/reviewStart.js';
 import type { AcpConfigOptionOverridesV1 } from '../sessionMetadata/metadataOverridesV1.js';
 import type { ConnectedServiceBindingsV1 } from '../connect/connectedServiceBindings.js';
@@ -87,7 +88,7 @@ function resolveRunStartModelAndConfig(input: Readonly<Record<string, unknown>>)
 
 export type ActionExecuteResult =
   | Readonly<{ ok: true; result: unknown }>
-  | Readonly<{ ok: false; errorCode: string; error: string; details?: unknown }>;
+  | Readonly<{ ok: false; errorCode: string; error: string; details?: unknown; candidates?: readonly string[] }>;
 
 export type ActionPreparedInvocation = Readonly<{
   run: (options?: Readonly<{ signal?: AbortSignal }>) => Promise<ActionExecuteResult>;
@@ -123,6 +124,9 @@ export type ActionExecutorContext = Readonly<{
    * wants to default to a current/active session.
    */
   defaultSessionId?: string | null;
+
+  /** Host-bound origin, separate from the mutable/default recipient. Never populated from action input. */
+  messageSource?: Pick<SessionMessageProvenanceV1, 'sourceSessionId' | 'via'>;
 
   /** Machine authoritatively bound to the current session, for explicitly declared contextual defaults. */
   defaultSessionMachineId?: string | null;
@@ -270,6 +274,7 @@ export type ActionExecutorDeps = Readonly<{
   sessionSendMessage: (args: Readonly<{
     sessionId: string;
     message: string;
+    provenance?: SessionMessageProvenanceV1;
     kind?: 'user' | 'notice';
     from?: string;
     localId?: string;
@@ -283,7 +288,7 @@ export type ActionExecutorDeps = Readonly<{
     callerPermissionMode?: string | null;
   }>) => Promise<unknown>;
   sessionTitleSet?: (args: Readonly<{ sessionId: string; title: string; serverId?: string | null }>) => Promise<unknown>;
-  sessionStop?: (args: Readonly<{ sessionId: string; serverId?: string | null }>) => Promise<SessionStopActionDependencyResult>;
+  sessionStop?: (args: Readonly<{ sessionId: string; serverId?: string | null; context?: ActionExecutorContext }>) => Promise<SessionStopActionDependencyResult>;
   sessionPermissionModeSet?: (args: Readonly<{
     sessionId: string;
     permissionMode: string;
@@ -695,6 +700,27 @@ function buildApprovalMetadata(spec: ActionSpec): NonNullable<ApprovalRequestV1[
   return {
     flow: resolveActionApprovalFlow(spec.approval),
     result: spec.approval.result,
+  };
+}
+
+function buildApprovedActionContext(args: Readonly<{
+  ctx: ActionExecutorContext;
+  request: ApprovalRequestV1;
+  serverId: string | null;
+  surface: keyof ActionSurfaces | null;
+}>): ActionExecutorContext {
+  const sessionId = typeof args.request.createdBy.sessionId === 'string'
+    ? args.request.createdBy.sessionId.trim()
+    : '';
+  return {
+    ...args.ctx,
+    messageSource: args.request.messageSource,
+    approvalOrigin: args.request.origin ?? null,
+    ...(args.serverId ? { serverId: args.serverId } : {}),
+    ...(sessionId ? { defaultSessionId: sessionId } : {}),
+    ...(args.surface ? { surface: args.surface } : {}),
+    placement: null,
+    bypassApprovals: true,
   };
 }
 
@@ -1268,7 +1294,7 @@ function normalizeActionExecutorThrownError(error: unknown): Readonly<{ errorCod
   };
 }
 
-function readActionExecuteFailure(result: unknown): Readonly<{ errorCode: string; error: string }> | null {
+function readActionExecuteFailure(result: unknown): Omit<Extract<ActionExecuteResult, { ok: false }>, 'ok'> | null {
   if (!result || typeof result !== 'object') return null;
   const record = result as Readonly<Record<string, unknown>>;
   if (record.ok !== false) return null;
@@ -1278,7 +1304,10 @@ function readActionExecuteFailure(result: unknown): Readonly<{ errorCode: string
   const error = typeof record.error === 'string' && record.error.trim().length > 0
     ? record.error
     : errorCode;
-  return { errorCode, error };
+  const candidates = errorCode === 'session_id_ambiguous' && Array.isArray(record.candidates)
+    ? record.candidates.filter((candidate): candidate is string => typeof candidate === 'string')
+    : [];
+  return { errorCode, error, ...(candidates.length > 0 ? { candidates } : {}) };
 }
 
 export function createActionExecutor(deps: ActionExecutorDeps): Readonly<{
@@ -1328,18 +1357,12 @@ export function createActionExecutor(deps: ActionExecutorDeps): Readonly<{
 
     const requestSurface = parseActionSurfaceKey((args.request as any).requestedSurface)
       ?? resolveApprovalRequestExecutionSurface(args.request.createdBy.surface);
-    const requestDefaultSessionId = typeof args.request.createdBy.sessionId === 'string' ? args.request.createdBy.sessionId.trim() : '';
     const exec = requestSurface
       ? args.runApprovedAction
         ? await args.runApprovedAction()
-        : await execute(args.request.actionId, args.request.actionArgs, {
-            ...args.ctx,
-            ...(args.effectiveServerId ? { serverId: args.effectiveServerId } : {}),
-            ...(requestDefaultSessionId ? { defaultSessionId: requestDefaultSessionId } : {}),
-            surface: requestSurface,
-            placement: null,
-            bypassApprovals: true,
-          })
+        : await execute(args.request.actionId, args.request.actionArgs, buildApprovedActionContext({
+            ctx: args.ctx, request: args.request, serverId: args.effectiveServerId, surface: requestSurface,
+          }))
       : { ok: false as const, errorCode: 'approval_execution_surface_invalid', error: 'approval_execution_surface_invalid' };
     const executedAtMs = Date.now();
     const nextExecuted: ApprovalRequestV1 = {
@@ -1447,6 +1470,9 @@ export function createActionExecutor(deps: ActionExecutorDeps): Readonly<{
     });
 
     try {
+      const messageSource = ctx.messageSource ? SessionMessageProvenanceV1Schema.parse({
+        v: 1, kind: 'happierSession', ...ctx.messageSource,
+      }) : undefined;
       if (approvalRouting?.required && !isApprovalAction) {
         if (!deps.approvalsCreate) {
           return { ok: false, errorCode: 'approvals_not_supported', error: 'approvals_not_supported' };
@@ -1474,6 +1500,7 @@ export function createActionExecutor(deps: ActionExecutorDeps): Readonly<{
           createdAtMs: now,
           updatedAtMs: now,
           createdBy,
+          ...(messageSource ? { messageSource } : {}),
           ...(requestedSurface ? { requestedSurface } : {}),
           actionId,
           actionArgs: parsed.data,
@@ -1541,20 +1568,12 @@ export function createActionExecutor(deps: ActionExecutorDeps): Readonly<{
               releaseBlockingOwnershipOnPrepareReturn = false;
               const requestSurface = parseActionSurfaceKey((approvedRequest as any).requestedSurface)
                 ?? resolveApprovalRequestExecutionSurface(approvedRequest.createdBy.surface);
-              const requestDefaultSessionId = typeof approvedRequest.createdBy.sessionId === 'string'
-                ? approvedRequest.createdBy.sessionId.trim()
-                : '';
               const approvedAdmission: PreparedAdmission = {
                 spec,
                 input: parsed.data,
-                context: {
-                  ...ctx,
-                  ...(effectiveServerId ? { serverId: effectiveServerId } : {}),
-                  ...(requestDefaultSessionId ? { defaultSessionId: requestDefaultSessionId } : {}),
-                  ...(requestSurface ? { surface: requestSurface } : {}),
-                  placement: null,
-                  bypassApprovals: true,
-                },
+                context: buildApprovedActionContext({
+                  ctx, request: approvedRequest, serverId: effectiveServerId, surface: requestSurface,
+                }),
               };
               return ready(approvedAdmission, async (runOptions) => {
                 try {
@@ -2278,6 +2297,7 @@ export function createActionExecutor(deps: ActionExecutorDeps): Readonly<{
           const res = await deps.sessionSendMessage({
             sessionId,
             message: (parsed.data as any).message,
+            ...(messageSource ? { provenance: messageSource } : {}),
             ...(messageKind ? { kind: messageKind } : {}),
             ...(from !== undefined ? { from } : {}),
             ...(localId !== null ? { localId } : {}),
@@ -2314,6 +2334,8 @@ export function createActionExecutor(deps: ActionExecutorDeps): Readonly<{
           if (!title) return { ok: false, errorCode: 'invalid_parameters', error: 'invalid_parameters' };
           const serverId = resolveServerIdForSession(deps, ctx, sessionId);
           const res = await deps.sessionTitleSet({ sessionId, title, ...(serverId ? { serverId } : {}) });
+          const failure = readActionExecuteFailure(res);
+          if (failure) return { ok: false, ...failure };
           return { ok: true, result: res };
         }
 
@@ -2324,7 +2346,7 @@ export function createActionExecutor(deps: ActionExecutorDeps): Readonly<{
             return { ok: false, errorCode: 'unsupported_action', error: 'unsupported_action:session.stop' };
           }
           const serverId = resolveServerIdForSession(deps, ctx, sessionId);
-          const res = await deps.sessionStop({ sessionId, ...(serverId ? { serverId } : {}) });
+          const res = await deps.sessionStop({ sessionId, ...(serverId ? { serverId } : {}), context: ctx });
           const stopFailed = 'success' in res ? res.success === false : res.ok === false;
           if (stopFailed) {
             const errorCode = res.code?.trim()
@@ -3074,6 +3096,7 @@ export function createActionExecutor(deps: ActionExecutorDeps): Readonly<{
           createdBy,
           ...(requestedSurface ? { requestedSurface } : {}),
           actionId: targetActionId,
+          ...(messageSource ? { messageSource } : {}),
           actionArgs: parsedTargetArgs.data,
           approval: buildApprovalMetadata(targetSpec),
           ...(approvalOrigin ? { origin: approvalOrigin } : {}),

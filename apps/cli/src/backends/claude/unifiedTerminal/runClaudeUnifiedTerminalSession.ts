@@ -7,6 +7,7 @@ import type {
   TerminalInputInjectionV1,
 } from '@happier-dev/agents';
 import {
+  parseSpecialCommand,
   SessionTerminalComposerClearResultV1Schema,
   type SessionTerminalComposerClearFailureStatusV1,
   type SessionTerminalComposerClearRequestV1,
@@ -32,6 +33,7 @@ import { createClaudeUnifiedTranscriptBridge } from './createClaudeUnifiedTransc
 import type { ClaudeEffectiveModelObservation } from '../sessionModels/effectiveModelUpdate';
 import type { ClaudeWorkflowActivityObservationContext } from '../workflows/claudeWorkflowActivitySource';
 import { isClaudeMainChainCompactBoundary } from '../localControl/readClaudeTranscriptTurnSignal';
+import { isClaudeInternalUserTextMessage } from '../utils/readClaudeUserMessageText';
 import type { ClaudeRemoteSubagentFileCollector } from '../remote/sidechains/claudeRemoteSubagentFileCollector';
 import {
   createClaudeUnifiedTerminalReadinessBridge,
@@ -172,6 +174,7 @@ import {
 } from './telemetry';
 import type { NormalizedProviderUsageLimitDetailsV1 } from '../connectedServices/mapClaudeRateLimitEventToUsageDetails';
 import { logger } from '@/ui/logger';
+import { runnerTerminationSignals, type RunnerTerminationSignal } from '@/agent/runtime/runnerTerminationOutcome';
 import {
   clearSessionMarkerTerminalHostHealth,
   publishSessionMarkerTerminalHostHealth,
@@ -196,10 +199,9 @@ type ClaudeUnifiedTerminalAcceptedInput<Mode> =
   ClaudeUnifiedTerminalQueuedInput<Mode> & ClaudeUnifiedPromptAcceptance;
 
 type ClaudeUnifiedTerminalHostPreference = ClaudeUnifiedTerminalHost;
-type ClaudeUnifiedProcessSignal = 'SIGINT' | 'SIGTERM';
 type ClaudeUnifiedProcessSignals = Readonly<{
-  once(event: ClaudeUnifiedProcessSignal, listener: () => void): unknown;
-  removeListener(event: ClaudeUnifiedProcessSignal, listener: () => void): unknown;
+  once(event: RunnerTerminationSignal, listener: () => void): unknown;
+  removeListener(event: RunnerTerminationSignal, listener: () => void): unknown;
 }>;
 
 export class ClaudeUnifiedTerminalHostUnavailableError extends Error {
@@ -797,12 +799,11 @@ function bindProcessSignalCleanup(params: Readonly<{
     });
   };
 
-  params.processSignals.once('SIGINT', onSignal);
-  params.processSignals.once('SIGTERM', onSignal);
+  const signals = runnerTerminationSignals();
+  for (const signal of signals) params.processSignals.once(signal, onSignal);
 
   return () => {
-    params.processSignals.removeListener('SIGINT', onSignal);
-    params.processSignals.removeListener('SIGTERM', onSignal);
+    for (const signal of signals) params.processSignals.removeListener(signal, onSignal);
   };
 }
 
@@ -824,11 +825,6 @@ function isAcceptedPromptTranscriptCandidate(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const type = (value as Record<string, unknown>).type;
   return type === 'user' || type === 'queue-operation' || type === 'attachment';
-}
-
-function isCompactSlashCommandPrompt(message: string): boolean {
-  const trimmed = message.trim();
-  return trimmed === '/compact' || trimmed.startsWith('/compact ');
 }
 
 function isDeterministicInvalidPromptTextFailure(
@@ -2425,7 +2421,7 @@ export async function runClaudeUnifiedTerminalSession<Mode extends EnhancedMode 
       };
       const confirmCompactBoundaryPromptAcceptedFromTranscript = (message: RawJSONLines): boolean => {
         if (!isClaudeMainChainCompactBoundary(message)) return false;
-        void arbiter.confirmPromptAcceptedByProviderIf((batch) => isCompactSlashCommandPrompt(batch.message)).catch(() => undefined);
+        void arbiter.confirmPromptAcceptedByProviderIf((batch) => parseSpecialCommand(batch.message).type === 'compact').catch(() => undefined);
         return true;
       };
       const pendingQueuePump = createClaudeUnifiedPendingQueuePump<Mode>({
@@ -2556,6 +2552,7 @@ export async function runClaudeUnifiedTerminalSession<Mode extends EnhancedMode 
         message: RawJSONLines,
         handler: ((message: RawJSONLines) => void | Promise<void>) | undefined,
       ): Promise<void> => {
+        if (isClaudeInternalUserTextMessage(message)) return;
         if (acceptedPromptTranscriptDiscovery.consumeAcceptedPromptTranscriptEcho(message)) {
           opts.onTranscriptMessageSuppressed?.(message);
           return;
@@ -2604,7 +2601,9 @@ export async function runClaudeUnifiedTerminalSession<Mode extends EnhancedMode 
               // feeds the centralized goal source; never reaches the visible transcript.
               opts.onRawTranscriptValue?.(value, observation);
             },
-            proveAcceptedMainTranscript: (value) => confirmPromptAcceptedFromTranscript([value]),
+            onMainTranscriptForPromptAcceptance: (value) => {
+              confirmPromptAcceptedFromTranscript([value]);
+            },
             onSubagentFileCollectorChanged: opts.onSubagentFileCollectorChanged,
             onSessionFound: opts.onSessionFound,
             validateSessionStart: (sessionInfo) => {

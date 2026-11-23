@@ -143,10 +143,16 @@ automatic resume to be enabled. The same recovery attempt handles checks from
 an active session, the CLI, and MCP; changing how you check does not start a
 separate recovery loop.
 
-Happier manages the wait even when the provider has no separate quota-check
-command. A reported reset time determines when it can try to continue; without
-a reliable reset time, Happier tries again using its recovery backoff.
-Temporary check failures keep the wait active.
+Happier waits for all exhausted quota windows reported for the current failure.
+When their reset times are known, the latest one controls the wait. If a reset
+time is missing, automatic recovery needs a quota check that confirms capacity
+before it can continue. Temporary check failures keep the wait active. If the
+agent cannot check quota, choose **Resume now** from the session warning to
+manually retry interrupted work.
+
+The session warning shows the expected time when one is available. Open the
+composer's usage gauge or expand an account to see the time remaining for
+each reported reset.
 
 Happier sends the configured continuation prompt, not a replay of your original
 request. Once the continuation is accepted into Pending, its normal queue and
@@ -162,11 +168,23 @@ not dismiss the warning. Accepted Pending delivery, explicit cancellation, or
 subsequent Agent activity can end the wait presentation.
 If **Apply reset** fails, its action becomes available again.
 
+If automatic recovery stops without resuming the session, the usage-limit banner stays
+with an action to try again. Depending on the failure, that action switches accounts or
+starts a new wait for the limit to reset. Cancelling a wait yourself still dismisses it.
+
 Pool quota selection determines which meters affect account eligibility before
 a request. A supported limit error that actually fails the Agent's main operation
 still follows the pool's configured switching rules and limits. Create separate
 pools when different sessions should use different quota filters; provider-enforced
 usage and spending limits still apply.
+
+Provider credits count as usable capacity. When an account's included limits are
+used up but the provider can still bill credits (Codex credits, Claude extra usage),
+the account shows its credit balance and "Included limits used · credits available"
+instead of looking used up. Pools keep a session working on that account and prefer
+it only after every account that still has included quota. Happier never buys
+credits or changes whether your provider spends them; if the provider itself reports
+a usage limit, the pool switches as usual.
 
 ## Model-capacity retries
 

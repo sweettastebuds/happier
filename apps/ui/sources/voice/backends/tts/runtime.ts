@@ -3,7 +3,7 @@ import { speakDeviceText, stopDeviceSpeech } from '@/voice/local/speakDeviceText
 import { speakGoogleCloudText } from '@/voice/output/GoogleCloudTtsController';
 import { speakKokoroText } from '@/voice/output/KokoroTtsController';
 import { speakOpenAiCompatText } from '@/voice/output/TtsController';
-import type { VoiceLocalTtsSettings } from '@/sync/domains/settings/voiceLocalTtsSettings';
+import { isVoiceLocalTtsConfigured, type VoiceLocalTtsSettings } from '@/sync/domains/settings/voiceLocalTtsSettings';
 import type { VoicePlaybackStopperRegistrar } from '@/voice/runtime/VoicePlaybackController';
 import { resolveKokoroOperationTimeoutMs } from '@/voice/kokoro/config/kokoroConfig';
 
@@ -14,12 +14,14 @@ import { resolveKokoroOperationTimeoutMs } from '@/voice/kokoro/config/kokoroCon
  */
 export async function speakWithLocalTtsProvider(ctx: {
   text: string;
+  readAloudChunkChars?: number;
   settings: any;
   tts: VoiceLocalTtsSettings;
   networkTimeoutMs: number;
   registerPlaybackStopper: VoicePlaybackStopperRegistrar;
   onSpeaking: () => void;
 }): Promise<void> {
+  if (!isVoiceLocalTtsConfigured(ctx.tts)) return;
   const provider = ctx.tts.provider;
 
   if (provider === 'device') {
@@ -85,6 +87,7 @@ export async function speakWithLocalTtsProvider(ctx: {
       apiKey,
       androidCertSha1,
       input: ctx.text,
+      readAloudChunkChars: ctx.readAloudChunkChars,
       voiceName,
       languageCode,
       format,
@@ -98,7 +101,6 @@ export async function speakWithLocalTtsProvider(ctx: {
 
   // openai_compat
   const baseUrl = String(ctx.tts.openaiCompat.baseUrl ?? '').trim();
-  if (!baseUrl) return;
   const apiKey = ctx.tts.openaiCompat.apiKey ? (sync.decryptSecretValue(ctx.tts.openaiCompat.apiKey) ?? null) : null;
   const model = ctx.tts.openaiCompat.model ?? 'tts-1';
   const voice = ctx.tts.openaiCompat.voice ?? 'alloy';
@@ -112,6 +114,7 @@ export async function speakWithLocalTtsProvider(ctx: {
     voice,
     format,
     input: ctx.text,
+    readAloudChunkChars: ctx.readAloudChunkChars,
     timeoutMs: ctx.networkTimeoutMs,
     registerPlaybackStopper: ctx.registerPlaybackStopper,
   });

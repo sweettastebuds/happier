@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
+import { scrolledCjkScreenText, scrolledCjkVisibleRows } from './__fixtures__/scrolledCjkComposer';
+
 import {
   isClaudeScreenReadyForInput,
   isSafeWindowForModeCycle,
@@ -27,6 +29,13 @@ const CROPPED_SINGLE_OPTION_USAGE_LIMIT_DIALOG = [
   '',
   'Enter to confirm · Esc to cancel',
 ].join('\n');
+
+// Native 2.1.316 chooser labels: installed executable bytes 318821800–318823900 and
+// 318831900–318833700; viewport shape from incident-weekly-limit-after-numbered-transcript.txt.
+const CLAUDE_2_1_316_CROPPED_USAGE_LIMIT_DIALOG = readFileSync(
+  new URL('./__fixtures__/claude-2.1.316-cropped-usage-limit.txt', import.meta.url),
+  'utf8',
+);
 
 const CLAUDE_2_1_259_HIDDEN_INDEX_TRUST_DIALOG = [
   'Accessing workspace:',
@@ -137,6 +146,63 @@ const CLAUDE_2_1_170 = {
 } as const;
 
 describe('parseClaudeScreenState — usage-limit chooser', () => {
+  it.each([
+    [1, 'Stop and wait for limit to reset', 'at Nov 8, 4pm'],
+    [2, 'Stop and wait for limit to reset', 'shortly'],
+    [3, 'Stop and wait for limit to reset', 'when the limit resets'],
+    [1, 'Stop', 'when the limit resets'],
+    [2, 'Stop', 'at Nov 8, 4pm'],
+    [3, 'Stop', 'shortly'],
+  ] as const)('recognizes the cropped 2.1.316 chooser focused on %i with %s / %s', (focus, stop, automatic) => {
+    const capture = CLAUDE_2_1_316_CROPPED_USAGE_LIMIT_DIALOG
+      .replace('Stop and wait for limit to reset', stop)
+      .replace('at Nov 8, 4pm', automatic)
+      .replace('❯ 1.', '  1.')
+      .replace(`  ${focus}.`, `❯ ${focus}.`);
+    const state = parseClaudeScreenState(capture);
+
+    expect(state.usageLimitDialogVisible).toBe(true);
+    expect(state.unrecognizedConfirmationDialogVisible).toBe(false);
+    expect(state.visibleDialogSelection?.options.map((option) => option.focused)).toEqual(
+      [1, 2, 3].map((choice) => choice === focus),
+    );
+    expect(resolveClaudeScreenInFlightSteerVeto(state)).toBe('usage_limit_dialog');
+  });
+
+  it('recognizes usage-limit semantics independently of option index', () => {
+    const state = parseClaudeScreenState([
+      'What do you want to do?',
+      '',
+      '  1. Switch to usage credits',
+      '❯ 2. Stop and wait for limit to reset',
+      '',
+      'Enter to confirm · Esc to cancel',
+    ].join('\n'));
+
+    expect(state.usageLimitDialogVisible).toBe(true);
+    expect(state.unrecognizedConfirmationDialogVisible).toBe(false);
+  });
+
+  it.each([
+    ['skipped option number', CLAUDE_2_1_316_CROPPED_USAGE_LIMIT_DIALOG.replace('  2.', '  4.')],
+    ['duplicate focus', CLAUDE_2_1_316_CROPPED_USAGE_LIMIT_DIALOG.replace('  2.', '❯ 2.')],
+    ['missing focus', CLAUDE_2_1_316_CROPPED_USAGE_LIMIT_DIALOG.replace('❯ 1.', '  1.')],
+    ['historical semantics', [
+      'What do you want to do?',
+      'Stop and wait for limit to reset',
+      '',
+      'What do you want to do?',
+      '',
+      '❯ 1. Continue the build',
+      '  2. Cancel the build',
+    ].join('\n')],
+  ])('keeps usage recognition fail-closed for %s', (_name, capture) => {
+    const state = parseClaudeScreenState(capture);
+
+    expect(state.usageLimitDialogVisible).toBe(false);
+    if (_name !== 'missing focus') expect(state.unrecognizedConfirmationDialogVisible).toBe(true);
+  });
+
   it.each([
     ['weekly limit', CLAUDE_2_1_228_USAGE_LIMIT_DIALOG.replace('session limit', 'weekly limit')],
     ['trust', CLAUDE_2_1_170.trustFolderPrompt],
@@ -1325,6 +1391,53 @@ describe('composer content exposure (incident cmq7pyqkj, U1)', () => {
 // composer draft soft-wraps onto indented continuation lines inside the composer box. Capturing
 // only the `❯` line truncated the draft, so an own-injected leftover could never exact-match the
 // own-text registry (guard misclassified it foreign_draft → injection starvation, C11).
+describe('parseClaudeScreenState — scrolled composer draft', () => {
+  const clipped = [
+    '❯ An earlier submitted prompt',
+    'Earlier assistant output.',
+    '─── ↑ 2 more ───────────────────────────────────────────────────────────────────',
+    '  The first visible draft paragraph.',
+    '',
+    '  The last visible draft paragraph.',
+    '────────────────────────────────────────────────────────────────────────────────',
+    '  Opus 5.5',
+    '  ⏵⏵ auto mode on (shift+tab to cycle)',
+  ].join('\n');
+
+  it('reads the bordered viewport instead of an earlier prompt echo and keeps it a user draft', () => {
+    const state = parseClaudeScreenState(clipped, { cursor: { x: 35, y: 5 } });
+    expect(state.composerContent).toBe('The first visible draft paragraph.\n\nThe last visible draft paragraph.');
+    expect(state.composerCursorRelation).toBe('inside_or_after_content');
+    expect(state.userDraftPresent).toBe(true);
+    expect(resolveClaudeScreenInFlightSteerVeto(state)).toBe('user_draft');
+  });
+
+  it('requires the complete bordered shape and lets a newer normal composer win', () => {
+    expect(parseClaudeScreenState(clipped.replace('────────────────────────────────────────────────────────────────────────────────\n', '')).composerContent)
+      .toBe('An earlier submitted prompt');
+    expect(parseClaudeScreenState(`${clipped}\n❯ current draft`).composerContent).toBe('current draft');
+    const withoutStatus = clipped.split('\n').slice(0, -2).join('\n');
+    expect(parseClaudeScreenState(`${withoutStatus}\n❯ current draft`).composerContent).toBe('current draft');
+    expect(parseClaudeScreenState('  A transcript paragraph\n────────────────\n  ⏵⏵ auto mode on').composerContent).toBeNull();
+  });
+
+  it('preserves shell ownership when its scrolled viewport has the native shell footer', () => {
+    const state = parseClaudeScreenState(clipped.replace('  Opus 5.5\n  ⏵⏵ auto mode on (shift+tab to cycle)', '  ! for shell mode'));
+    expect(state.composerContent).toBeNull();
+    expect(state.shellComposerContent).toBe('The first visible draft paragraph.\n\nThe last visible draft paragraph.');
+    expect(isClaudeScreenReadyForInput(state)).toBe(false);
+  });
+});
+
+describe('parseClaudeScreenState — scrolled CJK composer draft', () => {
+  it('reads every visible row, including one that opens with full-width punctuation', () => {
+    const state = parseClaudeScreenState(scrolledCjkScreenText);
+    expect(state.composerContent).toBe(scrolledCjkVisibleRows.join('\n'));
+    expect(state.userDraftPresent).toBe(true);
+    expect(state.modeMarker).toBe('bypassPermissions');
+  });
+});
+
 describe('parseClaudeScreenState — soft-wrapped composer draft (C11)', () => {
   const WRAPPED = [
     '⏺ BRAVO',

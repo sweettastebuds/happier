@@ -9,6 +9,51 @@ This document captures the current low-level Claude implementation across the CL
 - `legacy`: still wired, but no longer the preferred path
 - `unsupported`: intentionally absent today
 
+## Local retention (development source)
+
+`claudeSessionRetentionV1` in the account settings is the desired user-level
+policy. Missing/null is unmanaged and performs no writes; `providerDefault`
+removes only `cleanupPeriodDays`; `days` sets a positive safe integer. The Claude
+settings plugin owns the UI, including finite 36,500-day copy, shortening/reset
+confirmation and per-machine details. There is no billing gate.
+
+The generic provider-account-settings controller consumes the canonical account
+snapshot and calls the optional catalog hook on startup, snapshot changes,
+reconnect, completed Connected Services projection and successful materialization.
+Claude's hook enumerates
+native and existing canonical profile/group homes. The existing profile
+materializer reapplies the same editor after configuration copying, linking or
+isolation, so new and refreshed homes consume the same policy.
+
+`backends/claude/settings/claudeSessionRetentionSettings.ts` is the persistent
+editor. It rejects malformed settings, preserves unrelated keys and permissions,
+and resolves symlink targets through the settings guard. Intentional writes and
+terminal snapshot/restore share that guard's lock; the writer never restores its
+own write. Known profile-local legacy journals are recovered through the same
+owner. An already-running older guard or an external Claude/editor process does
+not participate in the new shared lock; restarting the older daemon/session is
+required to use the corrected ownership.
+
+Reports travel in encrypted/plain machine daemon state through the existing
+machine-state transport. `providerSettingsV1` reports configured user-level
+values, not effective running-process policy. Its source uses the current PID,
+CLI version and existing running-state timestamp, checked against the daemon
+and machine metadata, so retained state from an older daemon is not accepted as
+current support. Policy
+mismatch is pending; offline matching results are last confirmed. Missing or
+malformed reports never imply success. Local administrative file declarations
+produce a may-override warning; remote/MDM source selection remains vendor-owned.
+
+The existing launch `--settings` merger protects only a proven shared physical
+`projects` store when native Claude has an explicit longer configured period.
+The native configuration marker is produced by the configuration materializer
+and carried in its environment. Isolated stores and explicit shorter policies
+are not replaced by a global maximum. A launch using the same physical settings
+file as native Claude retains its explicit launch-setting precedence. Local,
+unified-terminal, Agent SDK, legacy SDK and catalog probes use this same merger
+and their effective child environment.
+No second settings argument or independent retention engine is introduced.
+
 ## Runtime surfaces
 
 | Feature | Status | Exact source files | Current behavior / special cases | Unified architecture migration notes |
@@ -18,7 +63,7 @@ This document captures the current low-level Claude implementation across the CL
 | Local interactive / attach path | `supported` | `apps/cli/src/backends/claude/runClaude.ts`, `apps/cli/src/backends/claude/claudeLocalLauncher.ts`, `apps/cli/src/backends/claude/claudeLocal.ts`, `apps/cli/src/backends/claude/session.ts`, `packages/agents/src/manifest.ts` | Canonical local path is Claude's own TUI; attach is tmux-oriented and exclusive-topology in metadata/UI contracts; `runClaude.ts` also has a fast-start attach path for terminal-local resumes. | Collapse local launch, attach, and fast-start attach behind one provider local-control descriptor instead of branching in `runClaude.ts`. |
 | Execution runs | `supported` | `apps/cli/src/backends/claude/executionRuns/executionRunBackendFactory.ts`, `apps/cli/src/backends/claude/sdkAgentBackend/ClaudeSdkAgentBackend.ts`, `apps/cli/src/backends/claude/executionRuns/resolveClaudeExecutionRunPermissionPolicy.ts`, `apps/cli/src/agent/executionRuns/registry/executionRunBackendRegistry.ts`, `apps/cli/src/capabilities/registry/toolExecutionRuns.ts` | Claude execution runs use a separate SDK-backed class and a temporary `settings.json`. Development source preserves the user's normal cache/data/state environment instead of allocating per-run XDG roots. | Converge user sessions and execution runs on one Claude runtime adapter so steering, capabilities, and checkpoint/sidechain behavior share the same plumbing. |
 | Persisted Happier transcript ingestion | `supported` | `apps/cli/src/backends/claude/session.ts`, `apps/cli/src/backends/claude/claudeLocalLauncher.ts`, `apps/cli/src/backends/claude/claudeRemoteLauncher.ts`, `apps/cli/src/backends/claude/utils/sessionScanner.ts`, `apps/cli/src/backends/claude/utils/readClaudeSessionJsonlMessages.ts` | Local mode tails Claude JSONL files through `createSessionScanner`; remote mode forwards streamed SDK messages and still updates `claudeSessionId` / `claudeTranscriptPath` metadata when hooks reveal exact session info. | Normalize transcript provenance so local-scanned, remote-streamed, and imported history use one transcript-source envelope. |
-| Linked direct transcript source (`.claude/projects/...jsonl`) | `supported` | `apps/cli/src/backends/claude/session.ts`, `apps/cli/src/backends/claude/directSessions/listClaudeSessionCandidates.ts`, `apps/cli/src/backends/claude/directSessions/pageClaudeTranscript.ts`, `apps/cli/src/backends/claude/directSessions/readAfterClaudeTranscript.ts`, `apps/cli/src/backends/claude/directSessions/resolveClaudeDirectSessionFile.ts` | When transcript storage is `direct`, `session.ts` writes `directSessionV1`; browse/tail reads provider-owned JSONL directly and supports backward paging plus forward tail-follow. | Replace `directSessionV1` and Claude-specific file cursors with a shared transcript-source contract used by browse, takeover, and handoff. |
+| Linked direct transcript source (`.claude/projects/...jsonl`) | `supported` | `apps/cli/src/backends/claude/session.ts`, `apps/cli/src/backends/claude/directSessions/listClaudeSessionCandidates.ts`, `apps/cli/src/backends/claude/directSessions/pageClaudeTranscript.ts`, `apps/cli/src/backends/claude/directSessions/readAfterClaudeTranscript.ts`, `apps/cli/src/backends/claude/directSessions/resolveClaudeDirectSessionFile.ts` | In 0.2 development, a fresh Direct launch publishes `directTranscriptPendingV1` so the session starts in the Direct tab. After transcript proof, the CLI replaces it with `directSessionV1` and publishes the Claude resume ID. Browse/tail reads provider-owned JSONL and supports backward paging plus forward tail-follow. | Replace `directSessionV1` and Claude-specific file cursors with a shared transcript-source contract used by browse, takeover, and handoff. |
 | Sidechains, subagents, and team inbox | `partial` | `apps/cli/src/backends/claude/remote/sidechains/claudeTaskOutputSidechainImporter.ts`, `apps/cli/src/backends/claude/remote/sidechains/claudeRemoteSubagentFileCollector.ts`, `apps/cli/src/backends/claude/remote/teamInbox/claudeRemoteTeamInboxBridge.ts`, `apps/cli/src/backends/claude/utils/teamInbox/claudeTeamInboxCollector.ts`, `apps/ui/sources/sync/domains/session/participants/providers/claude/deriveClaudeTeamParticipants.ts`, `apps/ui/sources/components/tools/renderers/workflow/SubAgentRunView.tsx` | Remote mode has dedicated collectors for `Task` / `Agent` JSONL sidechains and team-inbox messages; UI then reconstructs team state, shutdown pruning, and run previews from normalized tool calls plus imported sidechain messages. | Centralize Claude sidechain/team normalization so CLI collectors and UI participant derivation stop re-encoding the same lifecycle rules. |
 
 In development source, Direct takeover preserves the current native config
@@ -72,6 +117,12 @@ Raw runtime observers receive these records before transcript filtering; filteri
 does not establish message acceptance or foreground activity. UI normalization also
 filters already-persisted internal records, while genuinely unknown output retains
 the unsupported-output diagnostic.
+
+The Claude transcript filter withholds text-only user rows marked as provider
+context. Claude marks these rows `isSynthetic` in the SDK stream and `isMeta`
+in JSONL. SDK conversion checks the flags before mapping the row, and native
+history applies the same rule. Structured tool results and projected task or peer
+deliveries retain their existing transcript paths.
 
 In development source, native peer deliveries (cross-session messages, teammate
 messages and subagent hand-backs) use the shared
@@ -296,6 +347,18 @@ If typing Happier's freeform answer scrolls the entire heading above the viewpor
 the same resolver retains the already identified page only while its complete
 choices and Happier-owned draft still match. A headingless preexisting draft
 does not establish a new question identity.
+The pending hook-correlated question retains Happier's own draft and identified
+page across an interrupted answer attempt. Publication and answer navigation
+consume that same context; a changed terminal draft still belongs to the terminal
+user. The driver waits within the existing terminal verification window for each
+rendered transition instead of treating the first stale capture as a failed write.
+After final Submit, it retains the submitted answers and waits for the exact
+provider result. A retry checks confirmation without typing or submitting again;
+delayed confirmation remains pending and the app offers terminal recovery.
+The session permission router also reports a live receiver's answer-delivery
+failure as unconfirmed, preserving retry. Reconnect guidance is reserved for a
+missing or expired receiver; unconfirmed guidance does not claim final Submit
+was sent.
 Long reviews may clip earlier questions above the viewport. The same parser
 recognizes complete visible entries as a suffix of the hook-owned questions;
 the answer driver submits only after visiting every question page and matching

@@ -36,6 +36,80 @@ const focus = (screen: string, from: string, to: string) => screen.replace(`❯ 
 const controls = { isCurrent: () => true, wait: async () => undefined, settleMs: 0, verifyPollIntervalMs: 1, verifyPollTimeoutMs: 2 };
 
 describe('native Claude AskUserQuestion (2.1.304 captures)', () => {
+
+  it('answers the sole current question when its heading is above the terminal viewport', async () => {
+    const clipped = single.slice(single.indexOf('❯ 1. Amber'));
+    const port = createFakeControlPort({ captures: [clipped, idle] });
+    await expect(answerClaudeNativeQuestion({ ...controls, port, questions,
+      answers: { 'Which probe color?': ['Amber'] },
+    })).resolves.toEqual({ status: 'answered' });
+    expect(port.sentKeys).toEqual(['Enter']);
+
+    const changed = createFakeControlPort({ captures: [clipped.replace('Amber', 'Other')] });
+    await expect(answerClaudeNativeQuestion({ ...controls, port: changed, questions,
+      answers: { 'Which probe color?': ['Amber'] },
+    })).resolves.toMatchObject({ status: 'failed' });
+    expect(changed.sentKeys).toEqual([]);
+
+    const ambiguous = createFakeControlPort({ captures: [clipped] });
+    await expect(answerClaudeNativeQuestion({ ...controls, port: ambiguous,
+      questions: [
+        { ...questions[0]!, header: 'First', question: 'First color?' },
+        { ...questions[0]!, header: 'Second', question: 'Second color?' },
+      ],
+      answers: { 'First color?': ['Amber'], 'Second color?': ['Amber'] },
+    })).resolves.toMatchObject({ status: 'failed' });
+    expect(ambiguous.sentKeys).toEqual([]);
+  });
+
+  it('waits for delayed text rendering without typing or submitting twice', async () => {
+    const empty = freeform.replace('Otter freeform probe', 'Type something.');
+    const port = createFakeControlPort({ captures: [empty, empty, '', freeform, idle] });
+    await expect(answerClaudeNativeQuestion({ ...controls, verifyPollTimeoutMs: 5, port,
+      questions: [{ question: 'Which probe animal?', header: 'Animal', options: ['Cat', 'Dog'] }],
+      answers: { 'Which probe animal?': ['Otter freeform probe'] },
+    })).resolves.toEqual({ status: 'answered' });
+    expect(port.sentLiteral).toEqual(['Otter freeform probe']);
+    expect(port.sentKeys).toEqual(['Enter']);
+  });
+
+  it('resumes its unchanged wrapped draft after an interrupted attempt', async () => {
+    const filled = fixture('wrapped');
+    const text = Array.from({ length: 32 }, (_, index) => `word${String(index + 1).padStart(2, '0')}`).join(' ');
+    const shown = parseClaudeNativeQuestionScreen(filled)!.options.at(-1)!.label;
+    const empty = filled.replace(shown.split('\n').join('\n     '), 'Type something.');
+    const state = { drafts: new Map<number, string>(), questionIndex: -1 };
+    const params = { ...controls, state,
+      questions: [{ question: 'Which comma probe?', header: 'Comma', options: ['Alpha, beta', '雪 🦦'] }],
+      answers: { 'Which comma probe?': [text] },
+    };
+    const first = createFakeControlPort({ captures: [empty, ''] });
+    await expect(answerClaudeNativeQuestion({ ...params, port: first })).resolves.toMatchObject({ status: 'failed' });
+    const retry = createFakeControlPort({ captures: [filled, idle] });
+    await expect(answerClaudeNativeQuestion({ ...params, port: retry })).resolves.toEqual({ status: 'answered' });
+    expect(retry.sentLiteral).toEqual([]);
+    expect(retry.sentKeys).toEqual(['Enter']);
+    const changed = createFakeControlPort({ captures: [filled.replace('word01', 'edited')] });
+    await expect(answerClaudeNativeQuestion({ ...params, state: { drafts: state.drafts, questionIndex: state.questionIndex }, port: changed })).resolves.toMatchObject({ status: 'failed' });
+    expect(changed.sentKeys).toEqual([]);
+  });
+
+  it('reports sent-but-unconfirmed answers and makes a retry verification-only', async () => {
+    const state = { drafts: new Map<number, string>(), questionIndex: -1 };
+    const params = { ...controls, state, questions, answers: { 'Which probe color?': ['Amber'] } };
+    const port = createFakeControlPort({ captures: [single] });
+    await expect(answerClaudeNativeQuestion({ ...params, port, verifyApplied: () => 'pending' })).resolves.toEqual({ status: 'submitted' });
+    const retry = createFakeControlPort({ captures: [single] });
+    await expect(answerClaudeNativeQuestion({ ...params, port: retry, verifyApplied: () => 'matched' })).resolves.toEqual({ status: 'answered' });
+    expect(retry.sentKeys).toEqual([]);
+    expect(retry.sentLiteral).toEqual([]);
+    expect(retry.captureCount()).toBe(0);
+    await expect(answerClaudeNativeQuestion({ ...params, port: retry,
+      answers: { 'Which probe color?': ['Blue'] }, verifyApplied: () => 'pending',
+    })).resolves.toEqual({ status: 'failed', reason: 'native_question_already_submitted' });
+    expect(retry.sentKeys).toEqual([]);
+  });
+
   it('reports the failed answer state without recording question or answer content', async () => {
     const failures: unknown[] = [];
     const text = 'Private freeform answer';
@@ -81,7 +155,7 @@ describe('native Claude AskUserQuestion (2.1.304 captures)', () => {
     }
   });
 
-  it('answers every question and submits when narrow tabs and Submit wrap into aligned columns', async () => {
+  it.each([true, false])('answers every question with wrapped tabs and review confirmation prose present: %s', async (confirmationProse) => {
     // Tab columns captured from Claude 2.1.316 at 48 columns.
     const input = ['Color mode', 'Glass style', 'Phone hints'].map((header, index) => ({
       ...questions[0]!, header, question: `Which probe color for panel ${index + 1}?`,
@@ -95,7 +169,7 @@ describe('native Claude AskUserQuestion (2.1.304 captures)', () => {
       .replaceAll('Which probe color?', question.question));
     const reviewed = [header(3), '', 'Review your answers', '',
       ...input.flatMap((question) => [` ● ${question.question}`, '   → Amber']),
-      '', 'Ready to submit your answers?', '', '❯ 1. Submit answers', '  2. Cancel',
+      '', ...(confirmationProse ? ['Ready to submit your answers?', ''] : []), '❯ 1. Submit answers', '  2. Cancel',
     ].join('\n');
     const parsed = parseClaudeNativeQuestionScreen(reviewed);
     expect(parsed?.tabs).toEqual(input.map(({ header }) => ({ header: header.replace(' ', '\n'), answered: true })));
@@ -277,8 +351,9 @@ describe('native Claude AskUserQuestion (2.1.304 captures)', () => {
     expect(parseClaudeScreenState(screen).nativeQuestionPresentation).not.toBeNull();
   });
 
-  it('recognizes an overflowing review by its complete visible suffix and submits after inspecting every question page', async () => {
-    const clipped = review.slice(review.indexOf(' ● Which probe size?'));
+  it.each([true, false])('submits an overflowing review after inspecting every page, confirmation prose present: %s', async (confirmationProse) => {
+    const source = confirmationProse ? review : review.replace('Ready to submit your answers?\n', '');
+    const clipped = source.slice(source.indexOf(' ● Which probe size?'));
     const parsed = parseClaudeNativeQuestionScreen(clipped);
     expect(parsed).toMatchObject({ kind: 'review', reviewClipped: true, reviewAnswers: [{ question: 'Which probe size?', answer: 'Large' }] });
     expect(matchesClaudeNativeQuestionScreen(parsed!, multipleQuestions)).toBe(true);
@@ -300,7 +375,7 @@ describe('native Claude AskUserQuestion (2.1.304 captures)', () => {
     await expect(answerClaudeNativeQuestion({ ...controls, port: premature, questions: multipleQuestions, answers: fruitAnswers })).resolves.toEqual({ status: 'failed', reason: 'native_review_answers_mismatch' });
     expect(premature.sentKeys.filter((key) => key === 'Enter')).toHaveLength(2);
     expect(parseClaudeNativeQuestionScreen(clipped + '\nUnknown dialog')).toBeNull();
-    expect(parseClaudeNativeQuestionScreen(clipped.slice(clipped.indexOf('Ready to submit your answers?')))).toBeNull();
+    expect(parseClaudeNativeQuestionScreen(clipped.slice(clipped.indexOf('❯ 1. Submit answers')))).toBeNull();
   });
 
   it('recognizes the live Claude 309 question above its trailing native session-title rule', () => {
@@ -318,6 +393,10 @@ describe('native Claude AskUserQuestion (2.1.304 captures)', () => {
     ]);
     expect(parseClaudeNativeQuestionScreen(size)).toMatchObject({ kind: 'question', question: 'Which probe size?' });
     expect(parseClaudeNativeQuestionScreen(review)).toMatchObject({ kind: 'review' });
+    const literalConfirmation = review.replace(/^Ready to submit your answers\?\n/mu, '')
+      .replace('→ Large', '→ Large\n   Ready to submit your answers?');
+    expect(parseClaudeNativeQuestionScreen(literalConfirmation)?.reviewAnswers.at(-1)?.answer)
+      .toBe('Large\nReady to submit your answers?');
     expect(parseClaudeNativeQuestionScreen(unfilledReview)).toMatchObject({ kind: 'review', reviewAnswers: [] });
     expect(parseClaudeNativeQuestionScreen(partialReview)).toMatchObject({ kind: 'review', reviewAnswers: [{ question: 'Which probe size?', answer: 'Small' }] });
     expect(parseClaudeNativeQuestionScreen(freeform)?.options.at(-1)?.label).toBe('Otter freeform probe');
@@ -578,7 +657,7 @@ describe('native Claude AskUserQuestion (2.1.304 captures)', () => {
     await expect(answerClaudeNativeQuestion({ ...controls, port: mismatched, questions, answers: { 'Which probe color?': ['Amber'] }, verifyApplied: () => 'mismatched' })).resolves.toEqual({ status: 'failed', reason: 'native_answer_mismatch' });
     const pending = createFakeControlPort({ captures: [single], onSendSpecialKey: () => { current = false; } });
     current = true;
-    await expect(answerClaudeNativeQuestion({ ...controls, port: pending, questions, answers: { 'Which probe color?': ['Amber'] }, isCurrent: () => current, verifyApplied: () => 'pending' })).resolves.toEqual({ status: 'failed', reason: 'native_answer_unverified' });
+    await expect(answerClaudeNativeQuestion({ ...controls, port: pending, questions, answers: { 'Which probe color?': ['Amber'] }, isCurrent: () => current, verifyApplied: () => 'pending' })).resolves.toEqual({ status: 'submitted' });
   });
 
   it('leaves the multiline editor through Next and verifies complete multiline review before final Submit', async () => {

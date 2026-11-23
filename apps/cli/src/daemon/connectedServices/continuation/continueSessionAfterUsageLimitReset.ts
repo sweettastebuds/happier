@@ -7,7 +7,8 @@ import {
 import type { Credentials } from '@/persistence';
 import type { RawSessionRecord } from '@/session/transport/http/sessionsHttp';
 import type { sendSessionMessage } from '@/session/services/sendSessionMessage';
-import { buildUsageLimitIssueFingerprint } from '@happier-dev/protocol';
+import { buildUsageLimitIssueFingerprint, isSessionUsageLimitRecoveryForIssue } from '@happier-dev/protocol';
+import { readUsageLimitIssueFingerprintAgentId } from '@/session/usageLimitRecoveryControls/readUsageLimitIssueFingerprintAgentId';
 import { hasSameUsageLimitRecoveryIdentity } from '@/session/usageLimitRecoveryControls/mergeUsageLimitRecoveryIntent';
 import { readLatestUsageLimitFailureIssue } from '@/session/usageLimitRecoveryControls/readLatestUsageLimitFailureIssue';
 import { resolveUsageLimitRecoverySelectedAuthFromIssue } from '@/session/usageLimitRecoveryControls/usageLimitRecoverySelectedAuth';
@@ -78,22 +79,27 @@ export async function continueSessionAfterUsageLimitReset(input: Readonly<{
   }
   if (recovery.resumePromptMode === 'off') return { status: 'disabled' };
 
+  const owned = Boolean(recovery.runtimeAuthRecoveryAttemptId);
   const issue = input.rawSession.latestTurnStatus === 'failed'
     ? readLatestUsageLimitFailureIssue(input.rawSession) : null;
   if (!issue?.usageLimit || input.rawSession.archivedAt != null
     || issue.usageLimit.recoverability === 'manual' || issue.usageLimit.recoverability === 'switch_account'
-    || (issue.usageLimit.resetAtMs !== null && issue.usageLimit.resetAtMs !== recovery.resetAtMs)
     || !matchesCurrentBinding(input.metadata, recovery.selectedAuth)) return { status: 'superseded' };
   const failedAuth = resolveUsageLimitRecoverySelectedAuthFromIssue({ issue, connectedServices: input.metadata.connectedServices ?? null });
   if (!failedAuth || !matchesAuth(failedAuth, recovery.selectedAuth)) return { status: 'superseded' };
 
   // Backoff adapters persist their provider when the runtime issue omits it.
-  const fallbackProviderId = recovery.issueFingerprint.startsWith('usage-limit:')
-    ? recovery.issueFingerprint.split(':', 3)[1] : undefined;
+  const fallbackProviderId = readUsageLimitIssueFingerprintAgentId(recovery.issueFingerprint);
   const fingerprint = buildUsageLimitIssueFingerprint(issue, fallbackProviderId);
-  const owned = Boolean(recovery.runtimeAuthRecoveryAttemptId);
+  const sameFailure = isSessionUsageLimitRecoveryForIssue(issue, recovery, fallbackProviderId);
+  if (issue.usageLimit.resetAtMs !== null && issue.usageLimit.resetAtMs !== recovery.resetAtMs
+    && !sameFailure) return { status: 'superseded' };
+  // Legacy owned projections carry only an opaque attempt id; retain their existing
+  // temporal admission after the source/auth checks above. Structured reports use
+  // the shared association so a different known turn cannot inherit this attempt.
   // Rearming allocates a new lifecycle epoch; the fingerprint still identifies the failed issue.
-  if (issue.occurredAt > recovery.armedAtMs || (!owned && fingerprint !== recovery.issueFingerprint)) return { status: 'superseded' };
+  if (issue.occurredAt > recovery.armedAtMs
+    || ((!owned || recovery.issueFingerprint.startsWith('usage-limit:')) && !sameFailure)) return { status: 'superseded' };
   const interruptedOriginId = issue.providerTurnId
     ?? input.rawSession.latestTurnId
     ?? (fingerprint === recovery.issueFingerprint ? fingerprint : null);
@@ -119,7 +125,9 @@ export async function continueSessionAfterUsageLimitReset(input: Readonly<{
       if (!(await input.isCurrent()) || rawSession.latestTurnStatus !== 'failed' || rawSession.archivedAt != null || !metadata
         || rawSession.latestTurnId !== input.rawSession.latestTurnId) return false;
       const freshIssue = readLatestUsageLimitFailureIssue(rawSession);
-      if (!freshIssue || buildUsageLimitIssueFingerprint(freshIssue, fallbackProviderId) !== fingerprint || !matchesCurrentBinding(metadata, recovery.selectedAuth)) return false;
+      if (!freshIssue || freshIssue.occurredAt > recovery.armedAtMs
+        || !isSessionUsageLimitRecoveryForIssue(freshIssue, { ...recovery, issueFingerprint: fingerprint }, fallbackProviderId)
+        || !matchesCurrentBinding(metadata, recovery.selectedAuth)) return false;
       const source = issue.usageLimit?.connectedService;
       const freshSource = freshIssue.usageLimit?.connectedService;
       if (source?.serviceId !== freshSource?.serviceId || source?.profileId !== freshSource?.profileId
