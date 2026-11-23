@@ -6,7 +6,24 @@ import { join } from 'node:path';
 
 import type { AgentMessage } from '@/agent/core';
 import type { AcpPermissionHandler } from '@/agent/acp/AcpBackend';
+import type { ApiSessionClient } from '@/api/session/sessionClient';
+import { ProviderEnforcedPermissionHandler } from '@/agent/permissions/ProviderEnforcedPermissionHandler';
 import { PiRpcBackend } from './PiRpcBackend';
+
+/** The session boundary the real permission handler talks to (agentState + RPC handler registry). */
+class FakePermissionSession {
+  sessionId = 'omp-test-session';
+  agentState: any = { requests: {}, completedRequests: {} };
+  handlers = new Map<string, (payload: any) => any>();
+  rpcHandlerManager = { registerHandler: (name: string, handler: (payload: any) => any) => { this.handlers.set(name, handler); } };
+  getAgentStateSnapshot() { return this.agentState; }
+  getMetadataSnapshot() { return null; }
+  async updateAgentStateRequestSettlement(updater: (state: any) => any) { this.agentState = updater(this.agentState); }
+  updateAgentState(updater: (state: any) => any) { this.agentState = updater(this.agentState); return this.agentState; }
+  respond(id: string, decision: string) {
+    return this.handlers.get('permission')?.({ id, approved: decision !== 'denied', decision });
+  }
+}
 
 /**
  * Fake `omp --mode rpc-ui` child. Frame shapes follow oh-my-pi packages/coding-agent/src/modes/rpc
@@ -60,7 +77,14 @@ rl.on('line', (line) => {
       out({ type: 'agent_start' });
       if (scenario === 'approval') {
         out({ type: 'extension_ui_request', id: 'omp-approval-1', method: 'select',
-          title: 'Allow tool: bash\\ncommand: ls', options: ['Approve', 'Approve bash for this session', 'Deny'] });
+          title: 'Allow tool: bash\\nCommand: ls', options: ['Approve', 'Approve bash for this session', 'Deny'] });
+      } else if (scenario === 'approval-no-session') {
+        out({ type: 'extension_ui_request', id: 'omp-approval-1', method: 'select',
+          title: 'Allow tool: bash\\nCommand: ls', options: ['Approve', 'Deny'] });
+      } else if (scenario === 'cancel') {
+        out({ type: 'extension_ui_request', id: 'omp-approval-1', method: 'select',
+          title: 'Allow tool: bash\\nCommand: ls', options: ['Approve', 'Deny'] });
+        setTimeout(() => out({ type: 'extension_ui_request', id: 'cancel-1', method: 'cancel', targetId: 'omp-approval-1' }), 50);
       } else if (scenario === 'question') {
         out({ type: 'extension_ui_request', id: 'omp-question-1', method: 'select',
           title: 'Pick one', options: ['Alpha', 'Beta'] });
@@ -90,7 +114,7 @@ describe('PiRpcBackend omp flavor', () => {
   });
 
   function createHarness(options: {
-    scenario?: 'approval' | 'question' | 'ask';
+    scenario?: 'approval' | 'approval-no-session' | 'cancel' | 'question' | 'ask';
     flavor?: 'omp' | 'pi';
     env?: Record<string, string>;
     args?: string[];
@@ -195,7 +219,12 @@ describe('PiRpcBackend omp flavor', () => {
     const session = await h.backend.startSession();
     await h.backend.sendPrompt(session.sessionId, 'list files');
 
-    expect(handleToolCall).toHaveBeenCalledWith('omp-approval-1', 'bash', expect.objectContaining({ prompt: expect.stringContaining('Allow tool: bash') }));
+    expect(handleToolCall).toHaveBeenCalledWith(
+      'omp-approval-1',
+      'bash',
+      expect.objectContaining({ command: 'ls', prompt: expect.stringContaining('Allow tool: bash') }),
+      undefined,
+    );
     expect(h.log().find((e) => e.command?.type === 'extension_ui_response')!.command).toEqual({
       type: 'extension_ui_response', id: 'omp-approval-1', value: 'Approve',
     });
@@ -210,6 +239,56 @@ describe('PiRpcBackend omp flavor', () => {
     await forSession.backend.sendPrompt((await forSession.backend.startSession()).sessionId, 'x');
     expect(forSession.log().find((e) => e.command?.type === 'extension_ui_response')!.command.value)
       .toBe('Approve bash for this session');
+  });
+
+  it('scopes a session grant to the call: ls for the session never auto-approves a later rm -rf (real handler)', async () => {
+    const session = new FakePermissionSession();
+    const handler = new ProviderEnforcedPermissionHandler(session as unknown as ApiSessionClient, { logPrefix: '[Test]' });
+    const h = createHarness({ permissionHandler: handler });
+    const sessionId = (await h.backend.startSession()).sessionId;
+    const prompt = h.backend.sendPrompt(sessionId, 'x');
+    await vi.waitFor(() => expect(session.agentState.requests['omp-approval-1']).toBeTruthy());
+    await session.respond('omp-approval-1', 'approved_for_session');
+    await prompt;
+    expect(h.log().find((e) => e.command?.type === 'extension_ui_response')!.command.value).toBe('Approve bash for this session');
+
+    // A different command is not covered by the `ls` grant.
+    const next = handler.handleToolCall('omp-approval-2', 'bash', { command: 'rm -rf build', prompt: 'Allow tool: bash\nCommand: rm -rf build' });
+    expect(session.agentState.requests['omp-approval-2']).toBeTruthy();
+    await session.respond('omp-approval-2', 'denied');
+    await next;
+  });
+
+  it('answers once and records no grant when omp offered no session option (real handler)', async () => {
+    const session = new FakePermissionSession();
+    const handler = new ProviderEnforcedPermissionHandler(session as unknown as ApiSessionClient, { logPrefix: '[Test]' });
+    const h = createHarness({ scenario: 'approval-no-session', permissionHandler: handler });
+    const sessionId = (await h.backend.startSession()).sessionId;
+    const prompt = h.backend.sendPrompt(sessionId, 'x');
+    await vi.waitFor(() => expect(session.agentState.requests['omp-approval-1']).toBeTruthy());
+    await session.respond('omp-approval-1', 'approved_for_session');
+    await prompt;
+    expect(h.log().find((e) => e.command?.type === 'extension_ui_response')!.command.value).toBe('Approve');
+
+    const again = handler.handleToolCall('omp-approval-2', 'bash', { command: 'ls' });
+    expect(session.agentState.requests['omp-approval-2']).toBeTruthy();
+    await session.respond('omp-approval-2', 'denied');
+    await again;
+  });
+
+  it('cancels the pending Happier request on an omp cancel frame and writes no late answer', async () => {
+    const cancelPendingRequest = vi.fn<NonNullable<AcpPermissionHandler['cancelPendingRequest']>>(() => true);
+    let release!: () => void;
+    const handleToolCall = vi.fn<AcpPermissionHandler['handleToolCall']>(
+      () => new Promise((resolve) => { release = () => resolve({ decision: 'abort' }); }),
+    );
+    const h = createHarness({ scenario: 'cancel', permissionHandler: { handleToolCall, cancelPendingRequest } });
+    const turn = h.backend.sendPrompt((await h.backend.startSession()).sessionId, 'x');
+    turn.catch(() => undefined);
+    await vi.waitFor(() => expect(cancelPendingRequest).toHaveBeenCalledWith('omp-approval-1', expect.any(String)));
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(h.log().some((e) => e.command?.type === 'extension_ui_response')).toBe(false);
   });
 
   it('keeps a select without a trailing Deny as a normal question', async () => {
@@ -233,7 +312,8 @@ describe('PiRpcBackend omp flavor', () => {
     expect(h.log().find((e) => e.command?.type === 'extension_ui_response')!.command).toEqual({
       type: 'extension_ui_response',
       id: 'omp-ask-1',
-      answers: [{ id: 'q1', selectedOptions: ['Workspace'], customInput: 'and tests' }],
+      // omp rejects a single-select answer carrying both a label and custom text.
+      answers: [{ id: 'q1', selectedOptions: ['Workspace'] }],
     });
   });
 

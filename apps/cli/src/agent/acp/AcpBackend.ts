@@ -354,7 +354,11 @@ export type SessionConfigOption = Readonly<{
   options?: ReadonlyArray<Readonly<{ value: SessionConfigOptionValueId; name: string; description?: string }>>;
 }>;
 
-export type AcpPermissionCallContext = Readonly<{ permissionMode?: PermissionMode }>;
+export type AcpPermissionCallContext = Readonly<{
+  permissionMode?: PermissionMode;
+  /** The provider can only honour a once-answer for this request; an `approved_for_session` response is recorded as `approved`. */
+  sessionGrantUnavailable?: true;
+}>;
 
 /**
  * Permission handler interface for ACP backends

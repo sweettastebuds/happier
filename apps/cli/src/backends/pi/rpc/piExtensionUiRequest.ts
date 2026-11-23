@@ -228,12 +228,15 @@ function buildAskDialogResponse(request: PiBlockingExtensionUiRequest, result: P
     answers: questions.map((question, index) => {
       const labels = new Set(question.options.map((option) => option.label));
       const values = (answered[index] as string[]).filter((value): value is string => typeof value === 'string');
-      const selectedOptions = values.filter((value) => labels.has(value));
+      // omp rejects duplicate labels, and a single-select answer carrying more than one value.
+      const picked = [...new Set(values.filter((value) => labels.has(value)))];
+      const selectedOptions = question.multi === true ? picked : picked.slice(0, 1);
       const custom = values.filter((value) => !labels.has(value)).join('\n');
+      const keepCustom = custom && (question.multi === true || selectedOptions.length === 0);
       return {
         id: question.id,
         selectedOptions,
-        ...(custom ? { customInput: custom } : {}),
+        ...(keepCustom ? { customInput: custom } : {}),
       };
     }),
   };
@@ -245,10 +248,19 @@ export type PiToolApprovalRequest = Readonly<{
   prompt: string;
   /** Exact option labels as omp offered them; the last is always `Deny`. */
   options: readonly string[];
+  /** The bash command or file path named by the approval prompt's detail rows. */
+  command?: string;
+  path?: string;
+  /** omp offered an `Approve <subject> for this session` option for this request. */
+  sessionGrantOffered: boolean;
 }>;
 
 const OMP_APPROVAL_DENY_LABEL = 'Deny';
-const OMP_APPROVAL_TOOL_TITLE_PATTERN = /^Allow tool:\s*(\S+)/u;
+// `approvalHeader` in oh-my-pi tools/approval.ts: first row `Allow tool: <name>`, then the tool's detail rows.
+const OMP_APPROVAL_TOOL_TITLE_PATTERN = /^Allow tool: (\S+)/u;
+const OMP_APPROVAL_COMMAND_PATTERN = /^Command: ([\s\S]+)$/mu;
+const OMP_APPROVAL_PATH_PATTERN = /^(?:Path|File): (.+)$/mu;
+const OMP_APPROVE_SESSION_LABEL_PATTERN = /^Approve .+ for this session$/u;
 
 /**
  * omp (no approval dialog on RPC hosts) asks for tool approval as a `select` whose options end with
@@ -258,17 +270,39 @@ const OMP_APPROVAL_TOOL_TITLE_PATTERN = /^Allow tool:\s*(\S+)/u;
 export function parsePiToolApprovalSelect(request: PiBlockingExtensionUiRequest): PiToolApprovalRequest | null {
   if (request.method !== 'select' || !request.options || request.options.length < 2) return null;
   if (request.options[request.options.length - 1] !== OMP_APPROVAL_DENY_LABEL) return null;
+  const toolName = OMP_APPROVAL_TOOL_TITLE_PATTERN.exec(request.title)?.[1];
+  if (!toolName) return null;
+  const command = OMP_APPROVAL_COMMAND_PATTERN.exec(request.title)?.[1]?.trimEnd();
+  const path = OMP_APPROVAL_PATH_PATTERN.exec(request.title)?.[1]?.trim();
   return {
     id: request.id,
-    toolName: OMP_APPROVAL_TOOL_TITLE_PATTERN.exec(request.title)?.[1] ?? 'tool',
+    toolName,
     prompt: request.title,
     options: request.options,
+    ...(command ? { command } : {}),
+    ...(path ? { path } : {}),
+    sessionGrantOffered: request.options.some((option) => OMP_APPROVE_SESSION_LABEL_PATTERN.test(option)),
   };
+}
+
+/** The permission input for an omp approval: the call's own command/path so the canonical identifier is per call. */
+export function buildPiToolApprovalInput(request: PiToolApprovalRequest): Record<string, string> {
+  return {
+    prompt: request.prompt,
+    ...(request.command ? { command: request.command } : {}),
+    ...(request.path ? { path: request.path } : {}),
+  };
+}
+
+/** `targetId` of an omp `cancel` frame: omp settled that dialog (abort/timeout), so a late answer must not be written. */
+export function parsePiExtensionUiCancel(value: unknown): string | null {
+  const request = asRecord(value);
+  if (request?.type !== 'extension_ui_request' || request.method !== 'cancel') return null;
+  return readString(request.targetId);
 }
 
 // `Approve Once` is the once-label only beside remembered grants, where bare `Approve` is a grant.
 const OMP_APPROVE_ONCE_LABELS = ['Approve Once', 'Approve'] as const;
-const OMP_APPROVE_SESSION_LABEL_PATTERN = /^Approve .+ for this session$/u;
 
 /** The exact option label answering an approval; anything not explicitly approved is `Deny`. */
 export function buildPiToolApprovalResponse(

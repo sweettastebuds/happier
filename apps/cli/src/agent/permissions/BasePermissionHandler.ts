@@ -67,6 +67,14 @@ export interface PendingRequest {
     toolName: string;
     input: unknown;
     resolveDecisionIfPolicyChanges?: () => PermissionResult | null;
+    /** The provider offered no session scope for this request: a session grant is answered once and never allowlisted. */
+    sessionGrantUnavailable?: true;
+}
+
+function withoutSessionGrant(response: PermissionResponse): PermissionResponse {
+    if (!response.approved) return response;
+    const { allowedTools: _allowedTools, allowTools: _allowTools, updatedPermissions: _updatedPermissions, ...rest } = response;
+    return rest.decision === 'approved_for_session' ? { ...rest, decision: 'approved' } : rest;
 }
 
 /**
@@ -389,7 +397,10 @@ export abstract class BasePermissionHandler {
         localPending: PendingRequest | undefined;
         structuredAnswers?: StructuredQuestionAnswersV1;
     }>): Promise<boolean> {
-        const { response, context, localPending, structuredAnswers } = params;
+        const { context, localPending, structuredAnswers } = params;
+        const response = localPending?.sessionGrantUnavailable
+            ? withoutSessionGrant(params.response)
+            : params.response;
         const responseAllowedTools = response.allowedTools ?? response.allowTools;
         const updatedPermissions = response.updatedPermissions;
         const result = this.buildPermissionResult(response);
@@ -486,6 +497,7 @@ export abstract class BasePermissionHandler {
         toolName: string,
         input: unknown,
         resolveDecisionIfPolicyChanges?: () => PermissionResult | null,
+        options?: Readonly<{ sessionGrantUnavailable?: true }>,
     ): Promise<PermissionResult> {
         if (this.isPermissionRequestClaimed(toolCallId)) {
             return Promise.reject(new Error(`Permission request ${toolCallId} is reserved by a newer runtime`));
@@ -501,6 +513,7 @@ export abstract class BasePermissionHandler {
                 toolName,
                 input: normalizedInput,
                 resolveDecisionIfPolicyChanges,
+                ...(options?.sessionGrantUnavailable ? { sessionGrantUnavailable: true as const } : {}),
             });
         }
 

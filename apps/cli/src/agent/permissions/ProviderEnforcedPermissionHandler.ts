@@ -161,7 +161,13 @@ export class ProviderEnforcedPermissionHandler extends BasePermissionHandler {
     }
     // Provider continuations retain the policy of their admitted input.
     const permissionMode = context?.permissionMode;
-    const admittedContext = permissionMode === undefined ? undefined : Object.freeze({ permissionMode });
+    const sessionGrantUnavailable = context?.sessionGrantUnavailable;
+    const admittedContext = permissionMode === undefined && !sessionGrantUnavailable
+      ? undefined
+      : Object.freeze({
+        ...(permissionMode === undefined ? {} : { permissionMode }),
+        ...(sessionGrantUnavailable ? { sessionGrantUnavailable } : {}),
+      });
     const immediateDecision = this.getImmediateDecision(toolCallId, toolName, input, admittedContext);
     if (immediateDecision) {
       this.recordAutoDecision(toolCallId, toolName, input, immediateDecision.decision);
@@ -181,6 +187,7 @@ export class ProviderEnforcedPermissionHandler extends BasePermissionHandler {
       toolName,
       input,
       admittedContext ? () => this.getImmediateDecision(toolCallId, toolName, input, admittedContext) : undefined,
+      sessionGrantUnavailable ? { sessionGrantUnavailable } : undefined,
     );
     logger.debug(`${this.getLogPrefix()} Permission request sent for tool: ${toolName} (${toolCallId})`);
     return await pending;

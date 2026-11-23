@@ -589,3 +589,40 @@ describe('ProviderEnforcedPermissionHandler always-auto-approve matching', () =>
     }
   });
 });
+
+describe('ProviderEnforcedPermissionHandler session grant scope (omp approvals)', () => {
+  const respond = (session: FakeSession, id: string, decision: string) =>
+    session.rpcHandlerManager.handlers.get('permission')?.({ id, approved: decision !== 'denied', decision });
+
+  it('scopes a per-command session grant: approving `ls` for the session does not approve a later `rm -rf`', async () => {
+    const session = new FakeSession();
+    const handler = new ProviderEnforcedPermissionHandler(asApiSessionClient(session), { logPrefix: '[Test]' });
+
+    const first = handler.handleToolCall('omp-1', 'bash', { command: 'ls', prompt: 'Allow tool: bash\nCommand: ls' });
+    await respond(session, 'omp-1', 'approved_for_session');
+    await expect(first).resolves.toEqual({ decision: 'approved_for_session' });
+
+    await expect(handler.handleToolCall('omp-2', 'bash', { command: 'ls', prompt: 'x' }))
+      .resolves.toEqual({ decision: 'approved_for_session' });
+    const risky = handler.handleToolCall('omp-3', 'bash', { command: 'rm -rf build', prompt: 'x' });
+    expect(session.agentState.requests['omp-3']).toBeTruthy();
+    await respond(session, 'omp-3', 'denied');
+    await expect(risky).resolves.toEqual({ decision: 'denied' });
+  });
+
+  it('answers once and records no grant when the provider offered no session option', async () => {
+    const session = new FakeSession();
+    const handler = new ProviderEnforcedPermissionHandler(asApiSessionClient(session), { logPrefix: '[Test]' });
+    const context = { sessionGrantUnavailable: true } as const;
+
+    const first = handler.handleToolCall('omp-1', 'bash', { command: 'ls' }, context);
+    await respond(session, 'omp-1', 'approved_for_session');
+    await expect(first).resolves.toEqual({ decision: 'approved' });
+
+    const again = handler.handleToolCall('omp-2', 'bash', { command: 'ls' }, context);
+    expect(session.agentState.requests['omp-2']).toBeTruthy();
+    await respond(session, 'omp-2', 'denied');
+    await expect(again).resolves.toEqual({ decision: 'denied' });
+    expect(session.agentState.completedRequests['omp-1']?.allowedTools).toBeUndefined();
+  });
+});

@@ -80,7 +80,9 @@ import {
   buildPiExtensionAskUserQuestionInput,
   buildPiExtensionUiResponse,
   buildPiToolApprovalResponse,
+  buildPiToolApprovalInput,
   parsePiBlockingExtensionUiRequest,
+  parsePiExtensionUiCancel,
   parsePiToolApprovalSelect,
   parsePiExtensionUserInput,
   type PiExtensionUiResponse,
@@ -697,6 +699,8 @@ export class PiRpcBackend implements AgentBackend {
   private readonly pendingRequests = new Map<string, PendingRpcRequest>();
   private readonly openPromptRequestIds = new Set<string>();
   private readonly activeExtensionUiRequestIds = new Set<string>();
+  /** Active dialogs the provider already settled (timeout or `cancel` frame): no late answer is written for them. */
+  private readonly providerSettledExtensionUiRequestIds = new Set<string>();
   private readonly permissionHandler: AcpPermissionHandler | null;
   private pendingTurn: PendingTurn | null = null;
   private pendingTurnBarrier: Deferred<void> | null = null;
@@ -2196,6 +2200,11 @@ export class PiRpcBackend implements AgentBackend {
   }
 
   private handleEvent(event: Record<string, unknown>): void {
+    const cancelledDialogId = parsePiExtensionUiCancel(event);
+    if (cancelledDialogId) {
+      this.cancelProviderSettledExtensionUiRequest(cancelledDialogId, 'Pi cancelled the extension dialog');
+      return;
+    }
     const extensionRequest = parsePiBlockingExtensionUiRequest(event);
     if (extensionRequest) {
       this.notePendingTurnActivity(event);
@@ -2301,11 +2310,10 @@ export class PiRpcBackend implements AgentBackend {
   ): Promise<void> {
     if (!child || this.activeExtensionUiRequestIds.has(request.id)) return;
     this.activeExtensionUiRequestIds.add(request.id);
-    let providerTimedOut = false;
+    const providerSettled = () => this.providerSettledExtensionUiRequestIds.has(request.id);
     const timeout = typeof request.timeout === 'number'
       ? setTimeout(() => {
-        providerTimedOut = true;
-        this.permissionHandler?.cancelPendingRequest?.(request.id, 'Pi extension dialog timed out');
+        this.cancelProviderSettledExtensionUiRequest(request.id, 'Pi extension dialog timed out');
       }, request.timeout)
       : null;
     timeout?.unref?.();
@@ -2318,10 +2326,11 @@ export class PiRpcBackend implements AgentBackend {
           ? await this.permissionHandler.handleToolCall(
             toolApproval.id,
             toolApproval.toolName,
-            { prompt: toolApproval.prompt },
+            buildPiToolApprovalInput(toolApproval),
+            toolApproval.sessionGrantOffered ? undefined : { sessionGrantUnavailable: true },
           )
           : { decision: 'denied' as const };
-        if (providerTimedOut) return;
+        if (providerSettled()) return;
         await this.writeExtensionUiResponse(child, buildPiToolApprovalResponse(toolApproval, result));
         return;
       }
@@ -2332,10 +2341,10 @@ export class PiRpcBackend implements AgentBackend {
           buildPiExtensionAskUserQuestionInput(request),
         )
         : { decision: 'denied' as const };
-      if (providerTimedOut) return;
+      if (providerSettled()) return;
       await this.writeExtensionUiResponse(child, buildPiExtensionUiResponse(request, result));
     } catch {
-      if (providerTimedOut) return;
+      if (providerSettled()) return;
       await this.writeExtensionUiResponse(child, {
         type: 'extension_ui_response',
         id: request.id,
@@ -2344,7 +2353,14 @@ export class PiRpcBackend implements AgentBackend {
     } finally {
       if (timeout) clearTimeout(timeout);
       this.activeExtensionUiRequestIds.delete(request.id);
+      this.providerSettledExtensionUiRequestIds.delete(request.id);
     }
+  }
+
+  private cancelProviderSettledExtensionUiRequest(requestId: string, reason: string): void {
+    if (!this.activeExtensionUiRequestIds.has(requestId)) return;
+    this.providerSettledExtensionUiRequestIds.add(requestId);
+    this.permissionHandler?.cancelPendingRequest?.(requestId, reason);
   }
 
   private async writeExtensionUiResponse(
