@@ -50,6 +50,7 @@ out({ type: 'ready', protocolVersion: 1, supportedProtocolVersions: [1, 2], maxF
 const rl = readline.createInterface({ input: process.stdin });
 const scenario = process.env.OMP_FAKE_SCENARIO || 'approval';
 let streaming = false;
+let approvals = 0;
 rl.on('line', (line) => {
   let command;
   try { command = JSON.parse(line); } catch { return; }
@@ -76,11 +77,10 @@ rl.on('line', (line) => {
       ok();
       out({ type: 'agent_start' });
       if (scenario === 'approval') {
-        out({ type: 'extension_ui_request', id: 'omp-approval-1', method: 'select',
-          title: 'Allow tool: bash\\nCommand: ls', options: ['Approve', 'Approve bash for this session', 'Deny'] });
-      } else if (scenario === 'approval-no-session') {
-        out({ type: 'extension_ui_request', id: 'omp-approval-1', method: 'select',
-          title: 'Allow tool: bash\\nCommand: ls', options: ['Approve', 'Deny'] });
+        approvals += 1;
+        out({ type: 'extension_ui_request', id: 'omp-approval-' + approvals, method: 'select',
+          title: process.env.OMP_FAKE_TITLE || 'Allow tool: bash\\nCommand: ls',
+          options: process.env.OMP_FAKE_OPTIONS ? JSON.parse(process.env.OMP_FAKE_OPTIONS) : ['Approve', 'Approve bash for this session', 'Deny'] });
       } else if (scenario === 'cancel') {
         out({ type: 'extension_ui_request', id: 'omp-approval-1', method: 'select',
           title: 'Allow tool: bash\\nCommand: ls', options: ['Approve', 'Deny'] });
@@ -114,7 +114,7 @@ describe('PiRpcBackend omp flavor', () => {
   });
 
   function createHarness(options: {
-    scenario?: 'approval' | 'approval-no-session' | 'cancel' | 'question' | 'ask';
+    scenario?: 'approval' | 'cancel' | 'question' | 'ask';
     flavor?: 'omp' | 'pi';
     env?: Record<string, string>;
     args?: string[];
@@ -230,50 +230,80 @@ describe('PiRpcBackend omp flavor', () => {
     });
   });
 
-  it('answers Deny for a denied tool approval and the session label for approved_for_session', async () => {
+  const OMP_SESSION_OPTIONS = JSON.stringify(['Approve Once', 'Approve bash for this session', 'Deny']);
+  const responses = (h: Harness) => h.log().filter((e) => e.command?.type === 'extension_ui_response').map((e) => e.command.value);
+
+  it('answers Deny for a denied tool approval and never omp\'s tool-wide session label for approved_for_session', async () => {
     const denied = createHarness({ permissionHandler: { handleToolCall: async () => ({ decision: 'denied' }) } });
     await denied.backend.sendPrompt((await denied.backend.startSession()).sessionId, 'x');
-    expect(denied.log().find((e) => e.command?.type === 'extension_ui_response')!.command.value).toBe('Deny');
+    expect(responses(denied)).toEqual(['Deny']);
 
-    const forSession = createHarness({ permissionHandler: { handleToolCall: async () => ({ decision: 'approved_for_session' }) } });
+    const forSession = createHarness({
+      env: { OMP_FAKE_OPTIONS: OMP_SESSION_OPTIONS },
+      permissionHandler: { handleToolCall: async () => ({ decision: 'approved_for_session' }) },
+    });
     await forSession.backend.sendPrompt((await forSession.backend.startSession()).sessionId, 'x');
-    expect(forSession.log().find((e) => e.command?.type === 'extension_ui_response')!.command.value)
-      .toBe('Approve bash for this session');
+    expect(responses(forSession)).toEqual(['Approve Once']);
   });
 
-  it('scopes a session grant to the call: ls for the session never auto-approves a later rm -rf (real handler)', async () => {
+  it('Happier owns session scope per exact command: a repeat is auto-approved with the once label, a different command still prompts (real handler)', async () => {
     const session = new FakePermissionSession();
     const handler = new ProviderEnforcedPermissionHandler(session as unknown as ApiSessionClient, { logPrefix: '[Test]' });
-    const h = createHarness({ permissionHandler: handler });
+    const h = createHarness({ env: { OMP_FAKE_OPTIONS: OMP_SESSION_OPTIONS }, permissionHandler: handler });
     const sessionId = (await h.backend.startSession()).sessionId;
-    const prompt = h.backend.sendPrompt(sessionId, 'x');
+    const first = h.backend.sendPrompt(sessionId, 'x');
     await vi.waitFor(() => expect(session.agentState.requests['omp-approval-1']).toBeTruthy());
     await session.respond('omp-approval-1', 'approved_for_session');
-    await prompt;
-    expect(h.log().find((e) => e.command?.type === 'extension_ui_response')!.command.value).toBe('Approve bash for this session');
+    await first;
+    expect(responses(h)).toEqual(['Approve Once']);
+
+    // The identical command never reaches Happier's UI again, and omp is still answered once-only.
+    await h.backend.sendPrompt(sessionId, 'x');
+    expect(session.agentState.requests['omp-approval-2']).toBeUndefined();
+    expect(responses(h)).toEqual(['Approve Once', 'Approve Once']);
 
     // A different command is not covered by the `ls` grant.
-    const next = handler.handleToolCall('omp-approval-2', 'bash', { command: 'rm -rf build', prompt: 'Allow tool: bash\nCommand: rm -rf build' });
-    expect(session.agentState.requests['omp-approval-2']).toBeTruthy();
-    await session.respond('omp-approval-2', 'denied');
+    const next = handler.handleToolCall('omp-approval-3', 'bash', { command: 'rm -rf build', prompt: 'Allow tool: bash\nCommand: rm -rf build' });
+    expect(session.agentState.requests['omp-approval-3']).toBeTruthy();
+    await session.respond('omp-approval-3', 'denied');
     await next;
   });
 
-  it('answers once and records no grant when omp offered no session option (real handler)', async () => {
+  it.each([
+    ['a truncated command', 'Allow tool: bash\nCommand: echo aaaa[…4096ch elided…]'],
+    ['an edit', 'Allow tool: edit\nFile: /a/c.ts'],
+    ['a write', 'Allow tool: write\nPath: /a/b.txt'],
+  ])('approves %s once only: no session grant is recorded (real handler)', async (_label, title) => {
     const session = new FakePermissionSession();
     const handler = new ProviderEnforcedPermissionHandler(session as unknown as ApiSessionClient, { logPrefix: '[Test]' });
-    const h = createHarness({ scenario: 'approval-no-session', permissionHandler: handler });
+    const h = createHarness({ env: { OMP_FAKE_TITLE: title, OMP_FAKE_OPTIONS: OMP_SESSION_OPTIONS }, permissionHandler: handler });
     const sessionId = (await h.backend.startSession()).sessionId;
-    const prompt = h.backend.sendPrompt(sessionId, 'x');
+    const first = h.backend.sendPrompt(sessionId, 'x');
     await vi.waitFor(() => expect(session.agentState.requests['omp-approval-1']).toBeTruthy());
     await session.respond('omp-approval-1', 'approved_for_session');
-    await prompt;
-    expect(h.log().find((e) => e.command?.type === 'extension_ui_response')!.command.value).toBe('Approve');
+    await first;
 
-    const again = handler.handleToolCall('omp-approval-2', 'bash', { command: 'ls' });
+    const second = h.backend.sendPrompt(sessionId, 'x');
+    await vi.waitFor(() => expect(session.agentState.requests['omp-approval-2']).toBeTruthy());
+    await session.respond('omp-approval-2', 'denied');
+    await second;
+    expect(responses(h)).toEqual(['Approve Once', 'Deny']);
+  });
+
+  it('never turns a literal command ending in :* into a prefix grant (real handler)', async () => {
+    const session = new FakePermissionSession();
+    const handler = new ProviderEnforcedPermissionHandler(session as unknown as ApiSessionClient, { logPrefix: '[Test]' });
+    const h = createHarness({ env: { OMP_FAKE_TITLE: 'Allow tool: bash\nCommand: rm:*', OMP_FAKE_OPTIONS: OMP_SESSION_OPTIONS }, permissionHandler: handler });
+    const sessionId = (await h.backend.startSession()).sessionId;
+    const first = h.backend.sendPrompt(sessionId, 'x');
+    await vi.waitFor(() => expect(session.agentState.requests['omp-approval-1']).toBeTruthy());
+    await session.respond('omp-approval-1', 'approved_for_session');
+    await first;
+
+    const next = handler.handleToolCall('omp-approval-2', 'bash', { command: 'rm -rf build' });
     expect(session.agentState.requests['omp-approval-2']).toBeTruthy();
     await session.respond('omp-approval-2', 'denied');
-    await again;
+    await next;
   });
 
   it('cancels the pending Happier request on an omp cancel frame and writes no late answer', async () => {

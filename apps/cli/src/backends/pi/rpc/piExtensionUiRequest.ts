@@ -1,4 +1,5 @@
 import type { PermissionResult } from '@/agent/permissions/permissionResult';
+import { isShellToolName } from '@/agent/permissions/permissionToolIdentifier';
 
 import { PI_BRIDGE_USER_INPUT_MARKER_TYPE } from '../bridgeExtension/piBridgeExtensionEnv';
 
@@ -251,8 +252,11 @@ export type PiToolApprovalRequest = Readonly<{
   /** The bash command or file path named by the approval prompt's detail rows. */
   command?: string;
   path?: string;
-  /** omp offered an `Approve <subject> for this session` option for this request. */
-  sessionGrantOffered: boolean;
+  /**
+   * Happier must not remember this call: only an exact, untruncated shell command has a safe per-call
+   * identity (omp's own session grant is tool-wide, so it is never requested).
+   */
+  sessionGrantUnavailable: boolean;
 }>;
 
 const OMP_APPROVAL_DENY_LABEL = 'Deny';
@@ -260,7 +264,8 @@ const OMP_APPROVAL_DENY_LABEL = 'Deny';
 const OMP_APPROVAL_TOOL_TITLE_PATTERN = /^Allow tool: (\S+)/u;
 const OMP_APPROVAL_COMMAND_PATTERN = /^Command: ([\s\S]+)$/mu;
 const OMP_APPROVAL_PATH_PATTERN = /^(?:Path|File): (.+)$/mu;
-const OMP_APPROVE_SESSION_LABEL_PATTERN = /^Approve .+ for this session$/u;
+// `truncateForPrompt` in oh-my-pi tools/approval.ts: a truncated command is not the command that will run.
+const OMP_ELIDED_MARKER_PATTERN = /\[…\d+ch elided…\]/u;
 
 /**
  * omp (no approval dialog on RPC hosts) asks for tool approval as a `select` whose options end with
@@ -281,7 +286,7 @@ export function parsePiToolApprovalSelect(request: PiBlockingExtensionUiRequest)
     options: request.options,
     ...(command ? { command } : {}),
     ...(path ? { path } : {}),
-    sessionGrantOffered: request.options.some((option) => OMP_APPROVE_SESSION_LABEL_PATTERN.test(option)),
+    sessionGrantUnavailable: !(isShellToolName(toolName) && command && !OMP_ELIDED_MARKER_PATTERN.test(command)),
   };
 }
 
@@ -313,9 +318,6 @@ export function buildPiToolApprovalResponse(
   if (result.decision !== 'approved' && result.decision !== 'approved_for_session'
     && result.decision !== 'approved_execpolicy_amendment') return deny;
   const once = OMP_APPROVE_ONCE_LABELS.find((label) => request.options.includes(label));
-  const session = result.decision === 'approved_for_session'
-    ? request.options.find((option) => OMP_APPROVE_SESSION_LABEL_PATTERN.test(option))
-    : undefined;
-  const label = session ?? once;
-  return label ? { type: 'extension_ui_response', id: request.id, value: label } : deny;
+  // omp's `Approve <subject> for this session` grant is tool-wide and would bypass Happier: scope is Happier's, omp always gets once.
+  return once ? { type: 'extension_ui_response', id: request.id, value: once } : deny;
 }

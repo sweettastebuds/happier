@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPiExtensionUiResponse,
   buildPiToolApprovalInput,
+  buildPiToolApprovalResponse,
   parsePiBlockingExtensionUiRequest,
   parsePiExtensionUiCancel,
   parsePiToolApprovalSelect,
@@ -31,9 +32,20 @@ describe('omp tool approval select', () => {
     expect(buildPiToolApprovalInput(edit)).toMatchObject({ path: '/a/c.ts' });
   });
 
-  it('reports whether omp offered a session option', () => {
-    expect(parsePiToolApprovalSelect(select('Allow tool: bash\nCommand: ls', ['Approve', 'Approve bash for this session', 'Deny']))!.sessionGrantOffered).toBe(true);
-    expect(parsePiToolApprovalSelect(select('Allow tool: bash\nCommand: ls', ['Approve', 'Deny']))!.sessionGrantOffered).toBe(false);
+  it('only an exact, untruncated shell command may be remembered by Happier', () => {
+    const grantUnavailable = (title: string) => parsePiToolApprovalSelect(select(title, ['Approve', 'Deny']))!.sessionGrantUnavailable;
+    expect(grantUnavailable('Allow tool: bash\nCommand: ls')).toBe(false);
+    expect(grantUnavailable('Allow tool: bash\nCommand: echo a[…120ch elided…]')).toBe(true);
+    expect(grantUnavailable('Allow tool: edit\nFile: /a/c.ts')).toBe(true);
+    expect(grantUnavailable('Allow tool: bash')).toBe(true);
+  });
+
+  it('answers the once label for every approving decision, never omp\'s tool-wide session label', () => {
+    const request = parsePiToolApprovalSelect(select('Allow tool: bash\nCommand: ls', ['Approve Once', 'Approve bash for this session', 'Deny']))!;
+    for (const decision of ['approved', 'approved_for_session', 'approved_execpolicy_amendment'] as const) {
+      expect(buildPiToolApprovalResponse(request, { decision }).value).toBe('Approve Once');
+    }
+    expect(buildPiToolApprovalResponse(request, { decision: 'denied' }).value).toBe('Deny');
   });
 
   it('keeps a non-approval select that merely ends in Deny as a question', () => {

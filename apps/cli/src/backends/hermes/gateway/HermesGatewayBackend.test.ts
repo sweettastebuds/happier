@@ -290,8 +290,8 @@ describe('HermesGatewayBackend', () => {
 
     it.each([
       ['approved', 'once'],
-      ['approved_for_session', 'session'],
-      ['approved_execpolicy_amendment', 'session'],
+      ['approved_for_session', 'once'],
+      ['approved_execpolicy_amendment', 'once'],
       ['denied', 'deny'],
       ['abort', 'deny'],
     ] as const)('routes approval.request through the permission flow: %s -> %s', async (decision, choice) => {
@@ -319,6 +319,16 @@ describe('HermesGatewayBackend', () => {
 
       expect(permission.contexts).toEqual([{ sessionGrantUnavailable: true }]);
       expect(gateway.requests.find((r) => r.method === 'approval.respond')!.params).toMatchObject({ prompt_id: 'ap-nocmd', choice: 'once' });
+    });
+
+    it('approves an edit once only: no session grant is recorded and Hermes is never sent session/always', async () => {
+      const permission = makePermissionHandler(() => ({ decision: 'approved_for_session' }));
+      const { backend, gateway } = await setup({ backend: { permissionHandler: permission.handler } });
+      await backend.startSession();
+      gateway.emit('approval.request', SESSION, { ...approval, prompt_id: 'ap-edit', command: undefined, edit: { file_path: '/a/b.ts' } }, { execution_generation: 3 });
+      await settle(80);
+      expect(permission.contexts).toEqual([{ sessionGrantUnavailable: true }]);
+      expect(gateway.requests.find((r) => r.method === 'approval.respond')!.params).toMatchObject({ prompt_id: 'ap-edit', choice: 'once' });
     });
 
     it('offers the session grant when the approval names a concrete command', async () => {

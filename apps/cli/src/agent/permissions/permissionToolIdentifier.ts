@@ -20,7 +20,7 @@ function extractStringArray(value: unknown): string[] | null {
 
 const SHELL_TOOL_NAMES = new Set(['bash', 'execute', 'shell']);
 
-function isShellToolName(name: string): boolean {
+export function isShellToolName(name: string): boolean {
   return SHELL_TOOL_NAMES.has(name.toLowerCase());
 }
 
@@ -95,6 +95,17 @@ export function makeToolIdentifier(toolName: string, input: unknown): string {
     return `${toolName}(${command})`;
   }
   return toolName;
+}
+
+/**
+ * The identifier an `approved_for_session` decision records, or null when the call cannot be remembered
+ * exactly. A literal shell command ending in `:*` would be read back as a prefix grant, so it stays once-only;
+ * genuine prefix grants arrive through `allowedTools`/`updatedPermissions`, not through this path.
+ */
+export function makeSessionGrantIdentifier(toolName: string, input: unknown): string | null {
+  const command = extractShellCommand(input);
+  if (command && isShellToolName(toolName) && command.endsWith(':*')) return null;
+  return makeToolIdentifier(toolName, input);
 }
 
 export function isToolAllowedForSession(

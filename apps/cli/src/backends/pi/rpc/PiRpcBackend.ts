@@ -2327,7 +2327,7 @@ export class PiRpcBackend implements AgentBackend {
             toolApproval.id,
             toolApproval.toolName,
             buildPiToolApprovalInput(toolApproval),
-            toolApproval.sessionGrantOffered ? undefined : { sessionGrantUnavailable: true },
+            toolApproval.sessionGrantUnavailable ? { sessionGrantUnavailable: true } : undefined,
           )
           : { decision: 'denied' as const };
         if (providerSettled()) return;

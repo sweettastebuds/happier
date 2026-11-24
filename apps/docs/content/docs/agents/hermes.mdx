@@ -33,8 +33,8 @@ Hermes decides which actions need approval through its own `approvals.mode`
 setting. Happier only answers the approval prompts Hermes raises: the default
 mode asks you each time, and yolo approves them automatically. Happier does not
 enforce read-only or sandbox behavior for Hermes, so it offers only the default
-and yolo permission modes. An approval that does not name a concrete command is
-always answered once and never remembered for the session.
+and yolo permission modes. Approving "for this session" is remembered by Happier per exact command; edits and approvals
+that do not name a concrete command are approved once.
 
 ## Start and resume sessions
 

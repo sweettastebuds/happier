@@ -137,15 +137,10 @@ function chooseSessionSource(runtime: HermesGatewayRuntimeDescription): string {
   return source;
 }
 
-/** Fail closed: a choice is only ever one the prompt offered, and broader grants degrade to the nearest narrower one. */
+/** Fail closed. Session scope is Happier's: Hermes' own `session`/`always` grants are broader and never requested. */
 function chooseApprovalChoice(decision: PermissionResult['decision'], offered: readonly string[]): string {
-  const pick = (...candidates: string[]): string => candidates.find((c) => offered.includes(c)) ?? 'deny';
-  switch (decision) {
-    case 'approved': return pick('once');
-    case 'approved_for_session':
-    case 'approved_execpolicy_amendment': return pick('session', 'once');
-    default: return 'deny';
-  }
+  const approved = decision === 'approved' || decision === 'approved_for_session' || decision === 'approved_execpolicy_amendment';
+  return approved && offered.includes('once') ? 'once' : 'deny';
 }
 
 export class HermesGatewayBackend implements AgentBackend {
@@ -499,10 +494,9 @@ export class HermesGatewayBackend implements AgentBackend {
     const edit = asRecord(prompt.edit);
     const description = typeof prompt.description === 'string' ? prompt.description : '';
     const command = typeof prompt.command === 'string' ? prompt.command.trim() : '';
-    // A Bash approval without a concrete command would be recorded as a tool-wide grant: answer it once.
-    const onceOnly = !edit && command.length === 0;
-    const offered = (Array.isArray(prompt.choices) ? prompt.choices.filter((c): c is string => typeof c === 'string') : ['once', 'deny'])
-      .filter((c) => !(onceOnly && (c === 'session' || c === 'always')));
+    // Only a concrete shell command has a per-call identity; an edit or a command-less Bash approval would be a tool-wide grant.
+    const onceOnly = Boolean(edit) || command.length === 0;
+    const offered = Array.isArray(prompt.choices) ? prompt.choices.filter((c): c is string => typeof c === 'string') : ['once', 'deny'];
     let choice = 'deny';
     try {
       const handler = this.options.permissionHandler;

@@ -12,7 +12,7 @@ import { isExecutionRunPermissionRequestId } from '@/agent/executionRuns/runtime
 import type { ApiSessionClient } from "@/api/session/sessionClient";
 import { AgentState } from "@/api/types";
 import { updateAgentStateBestEffort as updateAgentStateBestEffortShared } from "@/api/session/sessionWritesBestEffort";
-import { isToolAllowedForSession, makeToolIdentifier } from './permissionToolIdentifier';
+import { isToolAllowedForSession, makeSessionGrantIdentifier } from './permissionToolIdentifier';
 import { applyAllowedToolsToAllowlist, applyUpdatedPermissionsToAllowlist, seedAllowlistFromCompletedRequests } from './applyPermissionAllowlistUpdates';
 import { recordToolTraceEvent, type ToolTraceProtocol } from '@/agent/tools/trace/toolTrace';
 import type { AccountSettings } from '@happier-dev/protocol';
@@ -237,11 +237,12 @@ export abstract class BasePermissionHandler {
             response.approved
             && !Array.isArray(responseAllowedTools)
             && result.decision === 'approved_for_session';
+        const derivedIdentifier = wantsDerivedAllowTools
+            ? makeSessionGrantIdentifier(requestSource.toolName, requestSource.input)
+            : null;
         const derivedAllowTools = Array.isArray(responseAllowedTools)
             ? responseAllowedTools
-            : (wantsDerivedAllowTools
-                ? [makeToolIdentifier(requestSource.toolName, requestSource.input)]
-                : undefined);
+            : (derivedIdentifier ? [derivedIdentifier] : undefined);
 
         return {
             status: response.approved ? 'approved' : 'denied',
@@ -273,7 +274,8 @@ export abstract class BasePermissionHandler {
             applyUpdatedPermissionsToAllowlist(this.allowedToolIdentifiers, updatedPermissions);
             applyAllowedToolsToAllowlist(this.allowedToolIdentifiers, responseAllowedTools);
             if (!Array.isArray(responseAllowedTools) && result.decision === 'approved_for_session') {
-                this.allowedToolIdentifiers.add(makeToolIdentifier(requestSource.toolName, requestSource.input));
+                const identifier = makeSessionGrantIdentifier(requestSource.toolName, requestSource.input);
+                if (identifier) this.allowedToolIdentifiers.add(identifier);
             }
         }
 
@@ -479,9 +481,8 @@ export abstract class BasePermissionHandler {
         if (this.isPermissionRequestClaimed(toolCallId)) {
             throw new Error(`Permission request ${toolCallId} is reserved by a newer runtime`);
         }
-        const allowedTools = decision === 'approved_for_session'
-            ? [makeToolIdentifier(toolName, input)]
-            : undefined;
+        const grantIdentifier = decision === 'approved_for_session' ? makeSessionGrantIdentifier(toolName, input) : null;
+        const allowedTools = grantIdentifier ? [grantIdentifier] : undefined;
         void this.requestStore.recordCompletedRequest({
             requestId: toolCallId,
             toolName,
