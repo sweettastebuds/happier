@@ -16,7 +16,9 @@ export const HERMES_CORE: AgentCoreConfig = {
     uiConnectedService: { serviceId: null, label: 'Hermes Agent', connectRoute: null },
     flavorAliases: ['hermes', 'hermes-agent'],
     cli: buildCatalogProviderCliUiConfig('hermes'),
-    permissions: { modeGroup: 'codexLike', promptProtocol: 'codexDecision' },
+    // Hermes' own approvals.mode decides which actions prompt; Happier answers those prompts (default asks, yolo
+    // approves) but cannot sandbox or block actions Hermes never asks about, so read-only/safe-yolo are not offered.
+    permissions: { modeGroup: 'codexLike', supportedModes: ['default', 'yolo'], promptProtocol: 'codexDecision' },
     sessionModes: { kind: getAgentSessionModesKind('hermes') },
     model: getAgentModelConfig('hermes'),
     resume: buildAgentResumeUiConfig({

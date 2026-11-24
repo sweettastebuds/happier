@@ -27,6 +27,15 @@ your Hermes gateway.
 You choose a Hermes profile when a session starts. The session keeps that
 profile and resume always uses it; you cannot switch profiles inside a session.
 
+## Permissions
+
+Hermes decides which actions need approval through its own `approvals.mode`
+setting. Happier only answers the approval prompts Hermes raises: the default
+mode asks you each time, and yolo approves them automatically. Happier does not
+enforce read-only or sandbox behavior for Hermes, so it offers only the default
+and yolo permission modes. An approval that does not name a concrete command is
+always answered once and never remembered for the session.
+
 ## Start and resume sessions
 
 ```bash

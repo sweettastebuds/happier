@@ -258,11 +258,10 @@ export async function connectHermesGatewayClient(options: Readonly<{
     }
 
     if (typeof frame.method === 'string' && frame.id !== undefined) {
-      // Server-to-client request (sudo, secret, desktop bridges). Happier answers none of them, and
-      // an explicit refusal lets the agent fail fast instead of waiting out its deadline.
-      try {
-        sendFrame({ jsonrpc: '2.0', id: frame.id, error: { code: -32601, message: `Happier does not handle "${frame.method}"` } });
-      } catch { /* connection ended */ }
+      // Server-to-client request (sudo, secret, desktop bridges). Happier never advertises
+      // `server_requests`, so Hermes should not send these; if one arrives anyway, stay silent:
+      // Hermes settles a request on the first response, errors included, and that answer belongs
+      // to the user's own TUI/Desktop.
       return;
     }
 
@@ -335,15 +334,6 @@ export async function connectHermesGatewayClient(options: Readonly<{
   }
 
   try {
-    // Advertise that server requests are answered (sudo/secret are refused above). A canonical-only
-    // owner may not serve this legacy verb; its absence is not a handshake failure.
-    await request('client.capabilities', { server_requests: true }).catch((error: unknown) => {
-      if (error instanceof HermesGatewayRpcError) {
-        logger.debug(`[hermes] client.capabilities not accepted (${error.code}); continuing`);
-        return;
-      }
-      throw error;
-    });
     const runtime = parseRuntimeDescription(await request('runtime.describe'));
     if (!runtime) throw new HermesGatewayConnectError('incompatible_runtime', 'The Hermes gateway returned an unrecognized runtime.describe result. Update Hermes or Happier.');
     const advertised = new Set([...runtime.capabilities, ...attachment.capabilities]);

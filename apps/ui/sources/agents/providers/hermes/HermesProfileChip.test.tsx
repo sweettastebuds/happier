@@ -23,13 +23,19 @@ vi.mock('@/text', async () => {
 // Network boundary: the machine RPC behind capability detection.
 vi.mock('@/sync/ops', () => ({ machineCapabilitiesDetect: detect }));
 
-// Lightweight list primitives that expose title/onPress, so the test reads the selection contract.
-vi.mock('@/components/ui/lists/ItemGroup', () => ({
-    ItemGroup: (props: { children?: React.ReactNode }) => React.createElement('ItemGroup', null, props.children),
-}));
-vi.mock('@/components/ui/lists/Item', () => ({
-    Item: (props: { title: string; testID?: string }) => React.createElement('Item', { ...props, testID: `item:${props.title}` }),
-}));
+// Presentation boundaries for the real Item/ItemGroup.
+vi.mock('react-native-unistyles', async () => {
+    const { createUnistylesMock } = await import('@/dev/testkit/mocks/unistyles');
+    return createUnistylesMock();
+});
+vi.mock('react-native-reanimated', async () => {
+    const { createReanimatedModuleMock } = await import('@/dev/testkit/mocks/reanimated');
+    return createReanimatedModuleMock();
+});
+vi.mock('@/modal', async () => {
+    const { createModalModuleMock } = await import('@/dev/testkit/mocks/modal');
+    return createModalModuleMock().module;
+});
 
 function profilesResponse(profiles: unknown) {
     return {
@@ -51,18 +57,18 @@ describe('HermesProfileSelectionContent', () => {
         const screen = await renderScreen(React.createElement(HermesProfileSelectionContent, {
             profile: null, machineId: 'm1', serverId: 's1', onSelect, requestClose,
         }));
-        await vi.waitFor(() => expect(screen.findByTestId('item:work')).toBeTruthy());
+        await vi.waitFor(() => expect(screen.findByTestId('hermes-profile-option:work')).toBeTruthy());
 
         expect(detect).toHaveBeenCalledWith(
             'm1',
             expect.objectContaining({ requests: [{ id: 'cli.hermes', params: { includeProfiles: true } }] }),
             expect.objectContaining({ serverId: 's1' }),
         );
-        screen.pressByTestId('item:work');
+        screen.pressByTestId('hermes-profile-option:work');
         expect(onSelect).toHaveBeenCalledWith('work');
         expect(requestClose).toHaveBeenCalled();
 
-        screen.pressByTestId('item:agentInput.hermesProfileChip.active');
+        screen.pressByTestId('hermes-profile-option:active');
         expect(onSelect).toHaveBeenLastCalledWith(null);
     });
 
@@ -74,7 +80,21 @@ describe('HermesProfileSelectionContent', () => {
         const screen = await renderScreen(React.createElement(HermesProfileSelectionContent, {
             profile: null, machineId: 'm1', serverId: null, onSelect: vi.fn(), requestClose: vi.fn(),
         }));
-        await vi.waitFor(() => expect(screen.findByTestId('item:agentInput.hermesProfileChip.error')).toBeTruthy());
+        await vi.waitFor(() => expect(screen.findByTestId('hermes-profile-error')).toBeTruthy());
+    });
+});
+
+describe('HermesProfileSelectionContent failure', () => {
+    it('shows the error state when the capability request rejects instead of loading forever', async () => {
+        detect.mockRejectedValue(new Error('rpc dropped'));
+        const { HermesProfileSelectionContent } = await import('./HermesProfileChip');
+        const { renderScreen } = await import('@/dev/testkit');
+
+        const screen = await renderScreen(React.createElement(HermesProfileSelectionContent, {
+            profile: null, machineId: 'm1', serverId: null, onSelect: vi.fn(), requestClose: vi.fn(),
+        }));
+        await vi.waitFor(() => expect(screen.findByTestId('hermes-profile-error')).toBeTruthy());
+        expect(screen.findByTestId('hermes-profile-loading')).toBeNull();
     });
 });
 

@@ -60,11 +60,17 @@ function getPermissionModeDescriptionForAgentType(agentType: AgentType, mode: Pe
 
 export function getPermissionModesForAgentType(agentType: AgentType): readonly PermissionMode[] {
     const agentId = resolveAgentIdFromFlavor(agentType) ?? DEFAULT_AGENT_ID;
-    const group = getAgentCore(agentId).permissions.modeGroup;
-    return group === 'codexLike' ? CODEX_LIKE_PERMISSION_MODES : CLAUDE_PERMISSION_MODES;
+    const { modeGroup, supportedModes } = getAgentCore(agentId).permissions;
+    const groupModes: readonly PermissionMode[] = modeGroup === 'codexLike' ? CODEX_LIKE_PERMISSION_MODES : CLAUDE_PERMISSION_MODES;
+    return supportedModes ? groupModes.filter((mode) => supportedModes.includes(mode)) : groupModes;
 }
 
 export function getPermissionModeOptionsForAgentType(agentType: AgentType): readonly PermissionModeOption[] {
+    const supported = getPermissionModesForAgentType(agentType);
+    return allPermissionModeOptionsForAgentType(agentType).filter((option) => supported.includes(option.value));
+}
+
+function allPermissionModeOptionsForAgentType(agentType: AgentType): readonly PermissionModeOption[] {
     const agentId = resolveAgentIdFromFlavor(agentType) ?? DEFAULT_AGENT_ID;
     const group = getAgentCore(agentId).permissions.modeGroup;
     if (group === 'codexLike') {
@@ -94,7 +100,9 @@ export function normalizePermissionModeForAgentType(mode: PermissionMode, agentT
     const agentId = resolveAgentIdFromFlavor(agentType) ?? DEFAULT_AGENT_ID;
     const group = getAgentCore(agentId).permissions.modeGroup;
     const normalized = (parsePermissionIntentAlias(mode) ?? 'default') as PermissionMode;
-    return normalizePermissionModeForGroup(normalized, group);
+    const inGroup = normalizePermissionModeForGroup(normalized, group);
+    const supportedModes = getAgentCore(agentId).permissions.supportedModes;
+    return supportedModes && !supportedModes.includes(inGroup) ? 'default' : inGroup;
 }
 
 export function getPermissionModeBadgeLabelForAgentType(agentType: AgentType, mode: PermissionMode): string {

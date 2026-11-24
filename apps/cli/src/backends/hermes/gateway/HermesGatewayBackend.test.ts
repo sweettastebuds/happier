@@ -52,17 +52,19 @@ function receipt(overrides: Record<string, unknown> = {}) {
 
 function makePermissionHandler(decide: (toolName: string, input: unknown) => PermissionResult | Promise<PermissionResult>) {
   const calls: Array<{ id: string; toolName: string; input: unknown }> = [];
+  const contexts: unknown[] = [];
   const cancelPendingRequest = vi.fn(() => true);
   const abortPendingRequestsAndFlush = vi.fn(async () => undefined);
   const handler: AcpPermissionHandler = {
-    handleToolCall: async (id: string, toolName: string, input: unknown) => {
+    handleToolCall: async (id: string, toolName: string, input: unknown, context?: unknown) => {
       calls.push({ id, toolName, input });
+      contexts.push(context);
       return await decide(toolName, input);
     },
     cancelPendingRequest,
     abortPendingRequestsAndFlush,
   } as unknown as AcpPermissionHandler;
-  return { handler, calls, cancelPendingRequest, abortPendingRequestsAndFlush };
+  return { handler, calls, contexts, cancelPendingRequest, abortPendingRequestsAndFlush };
 }
 
 describe('HermesGatewayBackend', () => {
@@ -303,6 +305,29 @@ describe('HermesGatewayBackend', () => {
       expect(gateway.requests.find((r) => r.method === 'approval.respond')!.params).toEqual({
         session_id: SESSION, execution_generation: 3, prompt_id: 'ap-1', choice,
       });
+    });
+
+    it.each([
+      ['an empty command', { command: '' }],
+      ['a redacted command', { command: undefined }],
+    ] as const)('never offers a tool-wide session grant for an approval with %s', async (_label, override) => {
+      const permission = makePermissionHandler(() => ({ decision: 'approved_for_session' }));
+      const { backend, gateway } = await setup({ backend: { permissionHandler: permission.handler } });
+      await backend.startSession();
+      gateway.emit('approval.request', SESSION, { ...approval, prompt_id: 'ap-nocmd', ...override }, { execution_generation: 3 });
+      await settle(80);
+
+      expect(permission.contexts).toEqual([{ sessionGrantUnavailable: true }]);
+      expect(gateway.requests.find((r) => r.method === 'approval.respond')!.params).toMatchObject({ prompt_id: 'ap-nocmd', choice: 'once' });
+    });
+
+    it('offers the session grant when the approval names a concrete command', async () => {
+      const permission = makePermissionHandler(() => ({ decision: 'approved' }));
+      const { backend, gateway } = await setup({ backend: { permissionHandler: permission.handler } });
+      await backend.startSession();
+      gateway.emit('approval.request', SESSION, approval, { execution_generation: 3 });
+      await settle(80);
+      expect(permission.contexts).toEqual([undefined]);
     });
 
     it('denies when no permission handler is attached and never grants a choice the prompt did not offer', async () => {

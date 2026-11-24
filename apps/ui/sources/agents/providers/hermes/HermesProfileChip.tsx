@@ -41,6 +41,8 @@ function useHermesProfiles(machineId: string | null, serverId: string | null): P
             setState(result.supported
                 ? readHermesProfilesFromCapability(result.response.results['cli.hermes'])
                 : { status: 'error' });
+        }).catch(() => {
+            if (!cancelled) setState({ status: 'error' });
         });
         return () => { cancelled = true; };
     }, [machineId, serverId]);
@@ -66,6 +68,7 @@ export function HermesProfileSelectionContent(props: Readonly<{
             <Item
                 title={t('agentInput.hermesProfileChip.active')}
                 subtitle={t('agentInput.hermesProfileChip.activeSubtitle')}
+                testID="hermes-profile-option:active"
                 selected={props.profile === null}
                 onPress={() => choose(null)}
                 showChevron={false}
@@ -73,6 +76,7 @@ export function HermesProfileSelectionContent(props: Readonly<{
             {profileList.map((entry) => (
                 <Item
                     key={entry.name}
+                    testID={`hermes-profile-option:${entry.name}`}
                     title={entry.name}
                     subtitle={entry.active ? t('agentInput.hermesProfileChip.currentlyActive') : undefined}
                     selected={props.profile === entry.name}
@@ -81,10 +85,10 @@ export function HermesProfileSelectionContent(props: Readonly<{
                 />
             ))}
             {profiles.status === 'loading' ? (
-                <Item title={t('agentInput.hermesProfileChip.loading')} showChevron={false} />
+                <Item testID="hermes-profile-loading" title={t('agentInput.hermesProfileChip.loading')} showChevron={false} />
             ) : null}
             {profiles.status === 'error' ? (
-                <Item title={t('agentInput.hermesProfileChip.error')} showChevron={false} />
+                <Item testID="hermes-profile-error" title={t('agentInput.hermesProfileChip.error')} showChevron={false} />
             ) : null}
             {profiles.status === 'unavailable' ? (
                 <Item title={t('agentInput.hermesProfileChip.notInstalled')} showChevron={false} />

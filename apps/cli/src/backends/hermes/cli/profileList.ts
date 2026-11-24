@@ -6,13 +6,13 @@
  * `{marker:2}{label:<15} {model:<28} ...`, where the label is `Display Name (id)` when a display
  * name is set and `◆` marks the active profile.
  */
-import { assertValidHermesProfileName, type HermesCommandRunner } from '../gateway/attach';
+import { assertValidHermesProfileName, HERMES_PROFILE_ID_SOURCE, type HermesCommandRunner } from '../gateway/attach';
 
 export type HermesProfileListEntry = Readonly<{ name: string; active: boolean }>;
 
 const NAME_COLUMN_WIDTH = 15;
 const SEPARATOR_LINE = /^\s*[─-]{3,}/;
-const DISPLAY_LABEL_ID = /\(([A-Za-z0-9][A-Za-z0-9._-]{0,63})\)/;
+const DISPLAY_LABEL_ID = new RegExp(`\\((${HERMES_PROFILE_ID_SOURCE})\\)`);
 
 function readProfileName(row: string): string | null {
   const firstToken = /^\S+/.exec(row)?.[0];

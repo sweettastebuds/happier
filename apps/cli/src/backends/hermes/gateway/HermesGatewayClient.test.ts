@@ -29,14 +29,13 @@ describe('connectHermesGatewayClient', () => {
     return client;
   }
 
-  it('dials with the ticket subprotocols, then handshakes: ready, client.capabilities, runtime.describe', async () => {
+  it('dials with the ticket subprotocols, then handshakes: ready, runtime.describe (server requests are never advertised)', async () => {
     const g = await gateway();
     const client = await connect(g);
 
     expect(g.subprotocolRequests[0]).toEqual(['hermes-gateway-v1', 'hermes-gateway-ticket.ticket-1']);
     expect(g.tickets).toEqual(['ticket-1']);
-    expect(g.requests.map((r) => r.method)).toEqual(['client.capabilities', 'runtime.describe']);
-    expect(g.requests[0]!.params).toEqual({ server_requests: true });
+    expect(g.requests.map((r) => r.method)).toEqual(['runtime.describe']);
     expect(client.runtime.session_create.sources).toContain('tui');
     expect(client.attachment.profileId).toBe('/home/u/.hermes');
   });
@@ -49,13 +48,6 @@ describe('connectHermesGatewayClient', () => {
   it('fails closed when the server selects no subprotocol at all', async () => {
     const g = await gateway({ selectProtocol: () => false });
     await expect(connect(g)).rejects.toBeInstanceOf(HermesGatewayConnectError);
-  });
-
-  it('tolerates a gateway that does not serve client.capabilities on the canonical socket', async () => {
-    const g = await gateway({
-      methods: { 'client.capabilities': () => { throw new FakeGatewayRpcFailure(-32601, 'unknown_method'); } },
-    });
-    await expect(connect(g)).resolves.toBeTruthy();
   });
 
   it.each([
@@ -137,12 +129,12 @@ describe('connectHermesGatewayClient', () => {
     expect(seen).toEqual([{ type: 'message.delta', session_id: 's1', payload: { text: 'hi' }, seq: 4, replay_epoch: 'e1', execution_generation: 2 }]);
   });
 
-  it('answers server-to-client requests with method-not-found so the agent fails fast', async () => {
+  it('never answers server-to-client requests: the first response settles them, and that belongs to the user', async () => {
     const g = await gateway();
     await connect(g);
     g.sendServerRequest('srq-1', 'sudo', { command: 'x' });
     await new Promise((r) => setTimeout(r, 50));
-    expect(g.clientResponses).toContainEqual(expect.objectContaining({ id: 'srq-1', error: expect.objectContaining({ code: -32601 }) }));
+    expect(g.clientResponses.filter((r) => (r as { id?: unknown }).id === 'srq-1')).toEqual([]);
   });
 
   it('rejects pending requests and notifies once when the socket drops', async () => {

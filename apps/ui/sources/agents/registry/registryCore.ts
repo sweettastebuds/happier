@@ -1,3 +1,4 @@
+import type { PermissionMode } from '@happier-dev/agents';
 import type { ModelMode } from '@/sync/domains/permissions/permissionTypes';
 import type { TranslationKey, TranslationKeyNoParams } from '@/text';
 import type { Href } from 'expo-router';
@@ -122,6 +123,11 @@ export type AgentCoreConfig = Readonly<{
     }>;
     permissions: Readonly<{
         modeGroup: PermissionModeGroupId;
+        /**
+         * Restricts the group's modes to those the provider can honour (default: every mode of the group).
+         * Unsupported modes are not offered and normalize to `default`.
+         */
+        supportedModes?: readonly PermissionMode[];
         promptProtocol: PermissionPromptProtocol;
     }>;
     sessionModes: Readonly<{

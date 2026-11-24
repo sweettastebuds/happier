@@ -1,6 +1,12 @@
 # Handoff: native OMP and Hermes agents (live validation)
 
-Branch `claude/affectionate-tesla-ax4z2v`, base `d06c9f6b`, commits `38b8ef23` (integrations) and `5b0da2e4` (review fixes). 101 files, about 5k lines. No PR is open. Nothing is staged by this document.
+> **Fork-only: keep this PR on the sweettastebuds fork; do not open or propose an upstream PR until the owner finishes several hours of real-use validation.**
+
+Branch `claude/affectionate-tesla-ax4z2v`. PR sweettastebuds/happier#1 is open as a draft; its base is the fork's `dev`, which equals upstream happier-dev/happier `dev` at `b48d051b` after merge commit `20c97fd2`. Earlier commits: `38b8ef23` (integrations) and `5b0da2e4` (review fixes). Nothing is staged by this document.
+
+Notes on the PR:
+- The website no longer lists Hermes as upcoming (removed in `00d95064`): `availability.test.ts` requires upcoming agents to exist in the v0.3 line, and Hermes does not yet.
+- Release Contracts CI fails on the base branch too (`npm_e2e_smoke` cli2), so that failure is not caused by this branch.
 
 Third-party source the code was written against: Oh My Pi (OMP) commit `f6d0dd7` (npm `@oh-my-pi/pi-coding-agent` 18.17.0) and Hermes commit `6b21d0564de0` (PyPI `hermes-agent` 0.19.0).
 
@@ -170,6 +176,14 @@ For the WebSocket, connect with the ticket from `attach.json` using any ws clien
 
 ## 6. Open findings and deferred items
 
+Resolved by the post-review fix lanes (do not re-open without new evidence):
+- OMP: approvals use a per-call identity; a session grant is recorded only when OMP offered one; cancel frames are handled; the `Allow tool:` prefix is parsed; repeated `ask` prompts are deduplicated and their size clamped.
+- Hermes: the client no longer advertises `client.capabilities {server_requests}` and never answers server-to-client requests (Hermes settles on the first response, so answering pre-empted the user's own TUI/Desktop on sudo/secret prompts).
+- Hermes: an approval with an empty or redacted command is answered once and is never offered a tool-wide session grant (`sessionGrantUnavailable`).
+- Hermes: profile names are validated with Hermes' own `^[a-z0-9][a-z0-9_-]{0,63}$`; the profile-list parser derives its id pattern from the same constant.
+- Hermes: `runHermesCommand` has an 8 s time budget and kills the child on timeout or abort; the profile chip shows an error instead of loading forever when the capability request rejects.
+- Hermes permission modes: the UI offers only `default` and `yolo` (`permissions.supportedModes`). Happier answers the prompts Hermes raises (governed by Hermes `approvals.mode`) but cannot sandbox or block actions Hermes does not ask about, so `read-only` and `safe-yolo` are not offered.
+
 Things the live run is most likely to break (assumptions from source only):
 1. OMP resume by bare id: `apps/cli/src/backends/pi/rpc/PiRpcBackend.ts` `resolveSessionFileForSessionId` only searches env-derived pi dirs, which are scrubbed for omp, so omp never passes a session file; it relies on OMP resolving `--resume <id>` (it may switch cwd or prompt if the project dir is missing). Fix if it fails: publish `get_state.sessionFile` and pass it to `--resume`. (Deferred in `5b0da2e4`.)
 2. OMP approvals are text-only: the permission handler is keyed by the `select` request id with `toolName` parsed from "Allow tool: X" and input `{prompt}`; no structured tool args, no link to the tool event. A non-tool `select` ending in "Deny" during a turn would be misread as an approval (accepted trade-off of decision 5).
@@ -180,7 +194,7 @@ Things the live run is most likely to break (assumptions from source only):
 7. Hermes profile list is parsed from human table output (`apps/cli/src/backends/hermes/cli/profileList.ts`; Hermes has no `--json` for it). Brittle to format changes and Windows console glyphs; failure shows an error row. Display names with parentheses can yield a wrong id (invalid ids are dropped, never passed to `-p`).
 8. Windows: candidate `AppData/Local/hermes/bin` in `packages/agents/src/providers/providerCliRuntime.ts` is home-relative, not `%LOCALAPPDATA%` (all providers share this style; rejected as a per-provider fix). `.exe` resolution and spawn via `resolveWindowsCommandInvocation` unvalidated on Windows/macOS.
 9. Hermes: `gateway.ready` `session_authority` is ignored (absent means loud RPC errors); `approved_execpolicy_amendment`/`for_session` degrade to "session"; `yolo` is not passed to Hermes (approvals always go through Happier's handler); `session.create` source tries `tui` then `cli` from `runtime.describe`. Early `session.info`/`notice` events before the snapshot id is adopted are dropped (review finding rejected: create id is unknowable pre-response).
-10. Unverified live specifics: OMP approval title and labels, `get_available_models` shape (`data.models[]`), `get_state` fields; Hermes `client.capabilities` on the canonical socket (tolerated if absent), `message.complete` admission id, `session.info` revision/generation, approval `edit` shape, `model.options` strings vs `session.mutate` model payload.
+10. Unverified live specifics: OMP approval title and labels, `get_available_models` shape (`data.models[]`), `get_state` fields; `message.complete` admission id, `session.info` revision/generation, approval `edit` shape, `model.options` strings vs `session.mutate` model payload.
 11. Cosmetic: error strings in `PiRpcBackend` still say "Pi ..." for omp; compaction provider label and connected-service runtime-auth classification say `pi` for omp; `omp/index.ts` uses a cast to inject `flavor`; `PiRpcFlavor.id` and `agentId` are redundant; `PI_CONFIG_FILES` is not scrubbed (negligible). Direct sessions and transcript import are not done for omp; hermes has no execution-run registration.
 12. Docs and website: `omp.mdx` and `hermes.mdx` still say "ships in the next Happier version" (appropriate until release). `apps/website/src/data/agents.ts`: `ohMyPi` and `hermes` are `upcoming` (only `shipped|upcoming` exist). Logos are neutral monograms. Hermes docs do not mention the `HAPPIER_HERMES_PROFILE` env var.
 13. UI chip not seen rendered; profile chosen is validated only at attach time; selecting a different machine after choosing keeps the choice (a profile absent there fails at attach with a clear error).

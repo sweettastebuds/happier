@@ -496,9 +496,13 @@ export class HermesGatewayBackend implements AgentBackend {
   }
 
   private async answerApproval(promptId: string, prompt: Record<string, unknown>): Promise<void> {
-    const offered = Array.isArray(prompt.choices) ? prompt.choices.filter((c): c is string => typeof c === 'string') : ['once', 'deny'];
     const edit = asRecord(prompt.edit);
     const description = typeof prompt.description === 'string' ? prompt.description : '';
+    const command = typeof prompt.command === 'string' ? prompt.command.trim() : '';
+    // A Bash approval without a concrete command would be recorded as a tool-wide grant: answer it once.
+    const onceOnly = !edit && command.length === 0;
+    const offered = (Array.isArray(prompt.choices) ? prompt.choices.filter((c): c is string => typeof c === 'string') : ['once', 'deny'])
+      .filter((c) => !(onceOnly && (c === 'session' || c === 'always')));
     let choice = 'deny';
     try {
       const handler = this.options.permissionHandler;
@@ -507,6 +511,7 @@ export class HermesGatewayBackend implements AgentBackend {
           promptId,
           edit ? 'Edit' : 'Bash',
           edit ? { ...edit, description } : { command: typeof prompt.command === 'string' ? prompt.command : '', description },
+          onceOnly ? { sessionGrantUnavailable: true } : undefined,
         );
         choice = chooseApprovalChoice(result.decision, offered);
       }

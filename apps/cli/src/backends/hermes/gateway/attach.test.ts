@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   attachHermesGateway,
@@ -65,8 +65,14 @@ describe('buildHermesAttachArgs', () => {
     expect(buildHermesAttachArgs(null)).toEqual(['gateway', 'attach', '--json']);
   });
 
+  it('accepts exactly the profile ids Hermes itself accepts', () => {
+    for (const good of ['default', 'work-2', 'a_b', '0x', 'a'.repeat(64)]) {
+      expect(() => buildHermesAttachArgs(good)).not.toThrow();
+    }
+  });
+
   it('rejects profile names that could be read as flags or paths', () => {
-    for (const bad of ['--start', '-x', 'a b', '../x', '']) {
+    for (const bad of ['--start', '-x', 'a b', '../x', '', 'Work', 'a.b', '_x', 'a'.repeat(65)]) {
       expect(() => buildHermesAttachArgs(bad)).toThrow(/Hermes profile name/);
     }
   });
@@ -159,6 +165,35 @@ describe('runHermesCommand (process boundary)', () => {
       env: process.env,
     });
     expect(result).toEqual({ exitCode: 5, stdout: 'out', stderr: 'err' });
+  });
+
+  it('kills a child that outlives its time budget and rejects with an observable timeout', async () => {
+    let pid = 0;
+    const started = Date.now();
+    const error = await runHermesCommand({
+      command: process.execPath,
+      args: ['-e', "console.log(process.pid);setInterval(()=>{},1000)"],
+      env: process.env,
+      timeoutMs: 400,
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/timed out after 400ms/);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    pid = Number(/\d+/.exec(String((error as { stdout?: string }).stdout ?? ''))?.[0] ?? 0);
+    expect(pid).toBeGreaterThan(0);
+    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
+  });
+
+  it('kills the child and rejects when the caller aborts', async () => {
+    const controller = new AbortController();
+    const pending = runHermesCommand({
+      command: process.execPath,
+      args: ['-e', 'setInterval(()=>{},1000)'],
+      env: process.env,
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 100);
+    await expect(pending).rejects.toBeInstanceOf(Error);
   });
 
   it('rejects with the spawn error when the executable does not exist', async () => {

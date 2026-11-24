@@ -13,6 +13,8 @@ export type HermesCommandInvocation = Readonly<{
   args: readonly string[];
   env: NodeJS.ProcessEnv;
   signal?: AbortSignal;
+  /** Overrides the runner's default time budget. */
+  timeoutMs?: number;
 }>;
 
 export type HermesCommandResult = Readonly<{
@@ -68,7 +70,9 @@ export type HermesGatewayAttachment = Readonly<{
   codeDrift: boolean;
 }>;
 
-const HERMES_PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/** Hermes `PROFILE_ID_RE` (hermes_constants.py, 6b21d0564de0): the only profile ids `hermes -p` accepts. */
+export const HERMES_PROFILE_ID_SOURCE = '[a-z0-9][a-z0-9_-]{0,63}';
+const HERMES_PROFILE_NAME = new RegExp(`^${HERMES_PROFILE_ID_SOURCE}$`);
 
 export function assertValidHermesProfileName(profile: string): void {
   if (!HERMES_PROFILE_NAME.test(profile)) {
