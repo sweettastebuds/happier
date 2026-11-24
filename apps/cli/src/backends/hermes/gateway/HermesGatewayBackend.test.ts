@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AcpPermissionHandler } from '@/agent/acp/AcpBackend';
 import type { AgentMessage } from '@/agent/core';
 import type { PermissionResult } from '@/agent/permissions/permissionResult';
+import { ProviderEnforcedPermissionHandler } from '@/agent/permissions/ProviderEnforcedPermissionHandler';
+import type { ApiSessionClient } from '@/api/session/sessionClient';
 
 import { HermesGatewayBackend, type HermesGatewayBackendOptions } from './HermesGatewayBackend';
 import {
@@ -319,6 +321,40 @@ describe('HermesGatewayBackend', () => {
 
       expect(permission.contexts).toEqual([{ sessionGrantUnavailable: true }]);
       expect(gateway.requests.find((r) => r.method === 'approval.respond')!.params).toMatchObject({ prompt_id: 'ap-nocmd', choice: 'once' });
+    });
+
+    it.each([
+      ['a masked secret', 'curl -H "Authorization: Bearer ghp_ab...wxyz" https://x.test'],
+      ['a fully masked secret', 'deploy --token=*** now'],
+      ['a vendor-labelled secret', 'run «redacted:ghp_…» now'],
+      ['a private key', 'echo [REDACTED PRIVATE KEY] > k'],
+      ['a revealed hidden character', 'echo hi\\u200b; rm -rf /'],
+      ['collapsed padding', 'echo ok ⟨+30 whitespace chars⟩ ; id'],
+    ] as const)('treats a command Hermes redacted (%s) as once-only, so the grant never covers a different secret', async (_label, command) => {
+      const state = { requests: {} as Record<string, unknown>, completedRequests: {} as Record<string, unknown> };
+      const rpc = new Map<string, (payload: unknown) => unknown>();
+      const session = {
+        sessionId: 's',
+        rpcHandlerManager: { registerHandler: (name: string, h: (payload: unknown) => unknown) => rpc.set(name, h) },
+        getAgentStateSnapshot: () => state,
+        getMetadataSnapshot: () => null,
+        updateAgentState: (u: (s: typeof state) => typeof state) => Object.assign(state, u(state)),
+        updateAgentStateRequestSettlement: async (u: (s: typeof state) => typeof state) => { Object.assign(state, u(state)); },
+      } as unknown as ApiSessionClient;
+      const handler = new ProviderEnforcedPermissionHandler(session, { logPrefix: '[Test]' });
+      const { backend, gateway } = await setup({ backend: { permissionHandler: handler } });
+      await backend.startSession();
+
+      gateway.emit('approval.request', SESSION, { ...approval, prompt_id: 'r-1', command }, { execution_generation: 3 });
+      await settle(80);
+      await rpc.get('permission')!({ id: 'r-1', approved: true, decision: 'approved_for_session' });
+      await settle(80);
+      expect(gateway.requests.find((r) => r.method === 'approval.respond')!.params).toMatchObject({ prompt_id: 'r-1', choice: 'once' });
+
+      gateway.emit('approval.request', SESSION, { ...approval, prompt_id: 'r-2', command }, { execution_generation: 3 });
+      await settle(80);
+      expect(state.requests['r-2']).toBeTruthy();
+      expect(gateway.requests.some((r) => r.method === 'approval.respond' && r.params.prompt_id === 'r-2')).toBe(false);
     });
 
     it('approves an edit once only: no session grant is recorded and Hermes is never sent session/always', async () => {

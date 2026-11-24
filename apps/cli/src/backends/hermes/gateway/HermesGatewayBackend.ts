@@ -46,6 +46,14 @@ import { runHermesCommand } from './runHermesCommand';
 
 const SESSION_SOURCES_IN_ORDER = ['tui', 'cli'] as const;
 
+/**
+ * Display-only edits Hermes makes to an approval command (`redact_approval_display`, agent/redact.py:966):
+ * `***`, `«redacted:…»`/`«redacted-secret»`, `[REDACTED PRIVATE KEY]` and `head...tail` masks (redact.py:904-981),
+ * plus `\uXXXX`/`\xXX` escapes and `⟨… ×N⟩`/`⟨+N …⟩` markers for hidden content (redact.py:915-963).
+ * Different secrets or hidden bytes render the same text, so a command carrying one has no per-call identity.
+ */
+const HERMES_REDACTED_COMMAND_RE = /\*{3}|«redacted|\[REDACTED PRIVATE KEY\]|[^\s.]\.{3}[^\s.]{4}|\\(?:u[0-9a-f]{4}|U[0-9a-f]{8}|x[0-9a-f]{2})|⟨[^⟩]*⟩/;
+
 /** Where a session must run: Hermes profile name for `-p`, and the owner identity it must resolve to. */
 export type HermesProfileBinding = Readonly<{
   /** `-p` name; null attaches to Hermes' active profile. */
@@ -494,8 +502,8 @@ export class HermesGatewayBackend implements AgentBackend {
     const edit = asRecord(prompt.edit);
     const description = typeof prompt.description === 'string' ? prompt.description : '';
     const command = typeof prompt.command === 'string' ? prompt.command.trim() : '';
-    // Only a concrete shell command has a per-call identity; an edit or a command-less Bash approval would be a tool-wide grant.
-    const onceOnly = Boolean(edit) || command.length === 0;
+    // Only a concrete shell command has a per-call identity; an edit, a command-less Bash approval or a command Hermes redacted would be a tool-wide or wrong-secret grant.
+    const onceOnly = Boolean(edit) || command.length === 0 || HERMES_REDACTED_COMMAND_RE.test(command);
     const offered = Array.isArray(prompt.choices) ? prompt.choices.filter((c): c is string => typeof c === 'string') : ['once', 'deny'];
     let choice = 'deny';
     try {
