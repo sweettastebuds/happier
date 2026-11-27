@@ -41,6 +41,7 @@ import type { InFlightSteerController, InFlightSteerPromptOptions } from '@/agen
 import type { Credentials } from '@/persistence';
 import { registerKillSessionHandler } from '@/rpc/handlers/killSession';
 import { MessageBuffer } from '@/ui/ink/messageBuffer';
+import { buildReadOnlyFooterLines } from '@/ui/ink/readOnlyFooterLines';
 import { logger } from '@/ui/logger';
 import { resolvePermissionModeSeedForAgentStart } from '@/settings/permissions/permissionModeSeed';
 import { resolveRunnerMcpServers } from '@/mcp/runtime/resolveRunnerMcpServers';
@@ -443,6 +444,7 @@ export async function runStandardAcpProvider(
   let terminalUi: TerminalUi | null = null;
   let terminalUiLoad: Promise<TerminalUi> | null = null;
   let terminalDisplayRequested = false;
+  let nonInteractiveNoticePrinted = false;
   let inkInstance: ReturnType<typeof render> | null = null;
   const ensureTerminalUi = (): Promise<TerminalUi> => {
     terminalUiLoad ??= loadTerminalUi(config, deps).then(
@@ -475,7 +477,18 @@ export async function runStandardAcpProvider(
     logger.warnFile(`${config.uiLogPrefix} Failed to show the terminal display`, error);
   };
   const mountTerminalDisplay = (): void => {
-    if (!hasTTY) return;
+    if (!hasTTY) {
+      // Without a TTY (for example `docker exec -T`) there is no Ink display. A user-started session
+      // would otherwise sit silent, so say once what this process is. It keeps running because it
+      // hosts the session for the app/web; daemon-started sessions have no terminal user to tell.
+      if (opts.startedBy !== 'daemon' && !nonInteractiveNoticePrinted) {
+        nonInteractiveNoticePrinted = true;
+        process.stdout.write(
+          `${[...buildReadOnlyFooterLines(config.backendDisplayName), `Session: ${session.sessionId}`].join('\n')}\n`,
+        );
+      }
+      return;
+    }
     terminalDisplayRequested = true;
     if (terminalUi) {
       try {

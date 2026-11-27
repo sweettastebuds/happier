@@ -6,6 +6,7 @@ import {
     getPermissionModeBadgeLabelForAgentType,
     getPermissionModeOptionsForAgentType,
     getPermissionModeOptionsForSession,
+    getPermissionModesForAgentType,
     normalizePermissionModeForAgentType,
 } from './permissionModeOptions';
 
@@ -23,6 +24,16 @@ describe('permissionModeOptions', () => {
         expect(normalizePermissionModeForAgentType('acceptEdits', 'codex')).toBe('safe-yolo');
         expect(normalizePermissionModeForAgentType('plan', 'codex')).toBe('read-only');
         expect(normalizePermissionModeForAgentType('plan', 'claude')).toBe('read-only');
+    });
+
+    it('offers Hermes only the modes its approval flow can honour', () => {
+        // Hermes decides which actions prompt (approvals.mode); Happier cannot sandbox or block writes it is never asked about.
+        expect(getPermissionModeOptionsForAgentType('hermes').map((o) => o.value)).toEqual(['default', 'yolo']);
+        expect(getPermissionModesForAgentType('hermes')).toEqual(['default', 'yolo']);
+        expect(normalizePermissionModeForAgentType('read-only', 'hermes')).toBe('default');
+        expect(normalizePermissionModeForAgentType('safe-yolo', 'hermes')).toBe('default');
+        expect(normalizePermissionModeForAgentType('bypassPermissions', 'hermes')).toBe('yolo');
+        expect(getPermissionModeOptionsForAgentType('codex').map((o) => o.value)).toEqual(['default', 'read-only', 'safe-yolo', 'yolo']);
     });
 
     it('does not include legacy plan in option lists', () => {

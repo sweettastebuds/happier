@@ -226,4 +226,17 @@ describe('ProviderSetupFlow', () => {
         expect(typeof icon.type === 'function' ? icon.type.name : icon.type).toBe('AgentIcon');
         expect(icon.props.agentId).toBe('cursor');
     });
+    it('does not offer install for a provider Happier has no managed install for, and points to its guide', async () => {
+        const { ProviderSetupFlow } = await import('./ProviderSetupFlow');
+        const screen = await renderScreen(React.createElement(ProviderSetupFlow, {
+            providerIds: ['codex', 'hermes'],
+        }));
+
+        const hermes = screen.findByTestId('provider-setup-option-hermes');
+        expect(hermes?.props.selected).toBe(false);
+        expect(hermes?.props.subtitle).toBe('settingsProviders.cliInstaller.notManaged');
+
+        await screen.pressByTestIdAsync('provider-setup-start-card');
+        expect(capabilitiesState.invoke.mock.calls.map((call) => ((call as unknown[])[1] as { id?: string } | undefined)?.id)).toEqual(['cli.codex']);
+    });
 });

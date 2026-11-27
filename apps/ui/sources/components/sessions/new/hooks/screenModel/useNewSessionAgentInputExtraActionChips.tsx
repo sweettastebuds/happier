@@ -20,6 +20,7 @@ export function useNewSessionAgentInputExtraActionChips(params: Readonly<{
     agentId: AgentId;
     agentOptionState?: Record<string, unknown> | null;
     setAgentOptionState: (key: string, next: unknown) => void;
+    selectedMachineId: string | null;
     connectedServicesAuthChip?: AgentInputExtraActionChip | null;
     showAutomationActionChips: boolean;
     automationDraft: NewSessionAutomationDraft;
@@ -89,6 +90,8 @@ export function useNewSessionAgentInputExtraActionChips(params: Readonly<{
             agentId: params.agentId,
             agentOptionState: params.agentOptionState,
             setAgentOptionState: params.setAgentOptionState,
+            machineId: params.selectedMachineId,
+            serverId: params.targetServerId,
         }) ?? [];
         const chips: AgentInputExtraActionChip[] = [];
 
@@ -138,9 +141,11 @@ export function useNewSessionAgentInputExtraActionChips(params: Readonly<{
         params.mcpChip,
         params.onActionShortcutPress,
         params.selectedMachineIsWindows,
+        params.selectedMachineId,
         params.setAgentOptionState,
         params.showAutomationActionChips,
         params.sourceContextChip,
+        params.targetServerId,
         params.windowsRemoteSessionLaunchMode,
         params.windowsTerminalAvailable,
         params.onWindowsRemoteSessionLaunchModeChange,

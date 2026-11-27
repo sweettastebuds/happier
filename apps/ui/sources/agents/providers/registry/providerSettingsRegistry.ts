@@ -22,6 +22,8 @@ import { AGY_PROVIDER_SETTINGS_PLUGIN } from '../agy/settings/plugin';
 import { FX_PROVIDER_SETTINGS_PLUGIN } from '../fx/settings/plugin';
 import { DROID_PROVIDER_SETTINGS_PLUGIN } from '../droid/settings/plugin';
 import { CODEBUDDY_PROVIDER_SETTINGS_PLUGIN } from '../codebuddy/settings/plugin';
+import { OMP_PROVIDER_SETTINGS_PLUGIN } from '../omp/settings/plugin';
+import { HERMES_PROVIDER_SETTINGS_PLUGIN } from '../hermes/settings/plugin';
 
 function isTranslationRef(value: unknown): value is Readonly<{ key: string }> {
     return Boolean(
@@ -162,6 +164,8 @@ export const PROVIDER_SETTINGS_PLUGINS = [
     FX_PROVIDER_SETTINGS_PLUGIN,
     DROID_PROVIDER_SETTINGS_PLUGIN,
     CODEBUDDY_PROVIDER_SETTINGS_PLUGIN,
+    OMP_PROVIDER_SETTINGS_PLUGIN,
+    HERMES_PROVIDER_SETTINGS_PLUGIN,
 ] as const satisfies readonly ProviderSettingsPlugin[];
 
 assertProviderSettingsPluginsValid(PROVIDER_SETTINGS_PLUGINS);

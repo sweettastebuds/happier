@@ -62,6 +62,7 @@ import {
   type PiContextTelemetry,
 } from './piContextTelemetryMarker';
 import { mapPiRpcEventToAgentMessages } from './eventMapping';
+import { PI_RPC_FLAVORS, removeScrubbedEnvKeys, type PiRpcFlavor, type PiRpcFlavorId } from './piRpcFlavor';
 import {
   createPiProviderFailureError,
   normalizePiProviderFailure,
@@ -78,7 +79,11 @@ import type {
 import {
   buildPiExtensionAskUserQuestionInput,
   buildPiExtensionUiResponse,
+  buildPiToolApprovalResponse,
+  buildPiToolApprovalInput,
   parsePiBlockingExtensionUiRequest,
+  parsePiExtensionUiCancel,
+  parsePiToolApprovalSelect,
   parsePiExtensionUserInput,
   type PiExtensionUiResponse,
 } from './piExtensionUiRequest';
@@ -649,6 +654,8 @@ async function stopPiRpcProcess(child: ChildProcessWithoutNullStreams): Promise<
 }
 
 export type PiRpcSpawnOptions = {
+  /** Which pi-family agent this process is. Defaults to `pi`. */
+  flavor?: PiRpcFlavorId;
   cwd: string;
   command: string;
   args: string[];
@@ -677,6 +684,7 @@ export class PiRpcBackend implements AgentBackend {
     toolsBridgeConfigText: string | null;
   }>;
 
+  private readonly flavor: PiRpcFlavor;
   private process: ChildProcessWithoutNullStreams | null = null;
   private appendSystemPromptArtifact: ProtectedTempTextArtifact | null = null;
   private toolsBridgeConfigArtifact: ProtectedTempTextArtifact | null = null;
@@ -691,6 +699,8 @@ export class PiRpcBackend implements AgentBackend {
   private readonly pendingRequests = new Map<string, PendingRpcRequest>();
   private readonly openPromptRequestIds = new Set<string>();
   private readonly activeExtensionUiRequestIds = new Set<string>();
+  /** Active dialogs the provider already settled (timeout or `cancel` frame): no late answer is written for them. */
+  private readonly providerSettledExtensionUiRequestIds = new Set<string>();
   private readonly permissionHandler: AcpPermissionHandler | null;
   private pendingTurn: PendingTurn | null = null;
   private pendingTurnBarrier: Deferred<void> | null = null;
@@ -709,6 +719,8 @@ export class PiRpcBackend implements AgentBackend {
   private sessionModelsRefresh: Deferred<boolean> | null = null;
   private pendingModelObservation: { models: unknown[]; observedAt: number } | null = null;
   private modelRuntimeStateReady = false;
+  /** `modelCatalog: 'rpc'` flavors read the catalog once per spawned process. */
+  private rpcModelCatalogRequested = false;
   private currentThinkingLevel = 'medium';
   private sessionModelsObservedAt: number | null = null;
   private lastPublishedUsageKey: string | null = null;
@@ -735,11 +747,12 @@ export class PiRpcBackend implements AgentBackend {
 
   constructor(options: PiRpcSpawnOptions) {
     this.permissionHandler = options.permissionHandler ?? null;
+    this.flavor = PI_RPC_FLAVORS[options.flavor ?? 'pi'];
     this.options = {
       cwd: options.cwd,
       command: options.command,
       args: [...options.args],
-      env: { ...(options.env ?? {}) },
+      env: removeScrubbedEnvKeys(this.flavor, { ...(options.env ?? {}) }),
       happierSessionId: asNonEmptyString(options.happierSessionId) ?? null,
       appendSystemPromptText:
         typeof options.appendSystemPromptText === 'string' && options.appendSystemPromptText.trim().length > 0
@@ -1379,7 +1392,7 @@ export class PiRpcBackend implements AgentBackend {
     // Pi's RPC supports `set_thinking_level`. We expose it through the generic model-scoped option id.
     if (normalizedId !== 'reasoning_effort') return;
 
-    const level = normalizePiThinkingEffort(value);
+    const level = normalizePiThinkingEffort(value, this.flavor.id);
     if (!level) return;
 
     await this.sendProviderAffectingCommand({ type: 'set_thinking_level', level }, 30_000);
@@ -1550,9 +1563,11 @@ export class PiRpcBackend implements AgentBackend {
   }
 
   private async resolveProtectedSpawnArtifactArgs(): Promise<string[]> {
-    this.modelDiscoveryArtifact ??= await materializePiModelDiscoveryExtension({ background: true });
+    if (this.flavor.modelCatalog === 'extension') {
+      this.modelDiscoveryArtifact ??= await materializePiModelDiscoveryExtension({ background: true });
+    }
     return [
-      '--extension', this.modelDiscoveryArtifact.path,
+      ...(this.modelDiscoveryArtifact ? ['--extension', this.modelDiscoveryArtifact.path] : []),
       ...(await this.resolveToolsBridgeConfigArgs()),
       ...(await this.resolveAppendSystemPromptArgs()),
     ];
@@ -1584,10 +1599,10 @@ export class PiRpcBackend implements AgentBackend {
     this.refreshPiBrokerLoadNonceForNextSpawn();
     const child = spawn(this.options.command, params.args, {
       cwd: this.options.cwd,
-      env: {
+      env: removeScrubbedEnvKeys(this.flavor, {
         ...process.env,
         ...this.options.env,
-      },
+      }),
       stdio: 'pipe',
       windowsHide: true,
     });
@@ -1597,10 +1612,16 @@ export class PiRpcBackend implements AgentBackend {
     }
 
     const spawnedChild = child as ChildProcessWithoutNullStreams;
+    // Written before any other command can be queued, so every (re)spawn is opted in. The response
+    // carries no pending request and is ignored.
+    if (this.flavor.askDialogOptIn) {
+      spawnedChild.stdin.write(`${JSON.stringify({ id: 'happier-set-ask-dialog', type: 'set_ask_dialog', enabled: true })}\n`);
+    }
     this.settleModelDiscovery(false);
     this.sessionModelsRefresh = createDeferred<boolean>();
     this.pendingModelObservation = null;
     this.modelRuntimeStateReady = false;
+    this.rpcModelCatalogRequested = false;
     this.process = spawnedChild;
     const stdoutLineReader = attachPiRpcJsonlLineReader(child.stdout, (line) => {
       if (this.process === spawnedChild) this.handleStdoutLine(line);
@@ -1853,7 +1874,7 @@ export class PiRpcBackend implements AgentBackend {
     await this.stopRpcProcessForRestart();
     await this.spawnRpcProcessWithProtectedArtifacts({
       argsBeforeProtected: this.options.args,
-      argsAfterProtected: ['--session', params.sessionArg],
+      argsAfterProtected: [this.flavor.resumeFlag, params.sessionArg],
     }, params.lifecycle);
 
     try {
@@ -2179,6 +2200,11 @@ export class PiRpcBackend implements AgentBackend {
   }
 
   private handleEvent(event: Record<string, unknown>): void {
+    const cancelledDialogId = parsePiExtensionUiCancel(event);
+    if (cancelledDialogId) {
+      this.cancelProviderSettledExtensionUiRequest(cancelledDialogId, 'Pi cancelled the extension dialog');
+      return;
+    }
     const extensionRequest = parsePiBlockingExtensionUiRequest(event);
     if (extensionRequest) {
       this.notePendingTurnActivity(event);
@@ -2284,15 +2310,30 @@ export class PiRpcBackend implements AgentBackend {
   ): Promise<void> {
     if (!child || this.activeExtensionUiRequestIds.has(request.id)) return;
     this.activeExtensionUiRequestIds.add(request.id);
-    let providerTimedOut = false;
+    const providerSettled = () => this.providerSettledExtensionUiRequestIds.has(request.id);
     const timeout = typeof request.timeout === 'number'
       ? setTimeout(() => {
-        providerTimedOut = true;
-        this.permissionHandler?.cancelPendingRequest?.(request.id, 'Pi extension dialog timed out');
+        this.cancelProviderSettledExtensionUiRequest(request.id, 'Pi extension dialog timed out');
       }, request.timeout)
       : null;
     timeout?.unref?.();
     try {
+      const toolApproval = this.flavor.toolApprovalViaSelect && this.pendingTurn
+        ? parsePiToolApprovalSelect(request)
+        : null;
+      if (toolApproval) {
+        const result = this.permissionHandler
+          ? await this.permissionHandler.handleToolCall(
+            toolApproval.id,
+            toolApproval.toolName,
+            buildPiToolApprovalInput(toolApproval),
+            toolApproval.sessionGrantUnavailable ? { sessionGrantUnavailable: true } : undefined,
+          )
+          : { decision: 'denied' as const };
+        if (providerSettled()) return;
+        await this.writeExtensionUiResponse(child, buildPiToolApprovalResponse(toolApproval, result));
+        return;
+      }
       const result = this.permissionHandler
         ? await this.permissionHandler.handleToolCall(
           request.id,
@@ -2300,10 +2341,10 @@ export class PiRpcBackend implements AgentBackend {
           buildPiExtensionAskUserQuestionInput(request),
         )
         : { decision: 'denied' as const };
-      if (providerTimedOut) return;
+      if (providerSettled()) return;
       await this.writeExtensionUiResponse(child, buildPiExtensionUiResponse(request, result));
     } catch {
-      if (providerTimedOut) return;
+      if (providerSettled()) return;
       await this.writeExtensionUiResponse(child, {
         type: 'extension_ui_response',
         id: request.id,
@@ -2312,7 +2353,14 @@ export class PiRpcBackend implements AgentBackend {
     } finally {
       if (timeout) clearTimeout(timeout);
       this.activeExtensionUiRequestIds.delete(request.id);
+      this.providerSettledExtensionUiRequestIds.delete(request.id);
     }
+  }
+
+  private cancelProviderSettledExtensionUiRequest(requestId: string, reason: string): void {
+    if (!this.activeExtensionUiRequestIds.has(requestId)) return;
+    this.providerSettledExtensionUiRequestIds.add(requestId);
+    this.permissionHandler?.cancelPendingRequest?.(requestId, reason);
   }
 
   private async writeExtensionUiResponse(
@@ -3277,7 +3325,7 @@ export class PiRpcBackend implements AgentBackend {
   }
 
   private async getCommands(options: PiRpcCommandOptions = {}, timeoutMs = 30_000): Promise<PiRpcCommandsData> {
-    const response = await this.sendCommand({ type: 'get_commands' }, timeoutMs, options);
+    const response = await this.sendCommand({ type: this.flavor.commandsRpc }, timeoutMs, options);
     return (asRecord(response.data) ?? {}) as PiRpcCommandsData;
   }
 
@@ -3303,6 +3351,7 @@ export class PiRpcBackend implements AgentBackend {
         provider, modelId: id, ...(name ? { name } : {}),
         supportsThinking: model?.reasoning === true,
         thinkingEffort: this.currentThinkingLevel,
+        thinkingScale: this.flavor.id,
       });
       return projected ? [projected] : [];
     });
@@ -3322,6 +3371,25 @@ export class PiRpcBackend implements AgentBackend {
     this.settleModelDiscovery(true);
   }
 
+  private requestRpcModelCatalog(isCurrent: () => boolean): void {
+    if (this.flavor.modelCatalog !== 'rpc' || this.rpcModelCatalogRequested) return;
+    this.rpcModelCatalogRequested = true;
+    void this.sendCommand({ type: 'get_available_models' }, 30_000, { processAlreadyEnsured: true }).then((response) => {
+      if (!isCurrent()) return;
+      const models = asRecord(response.data)?.models;
+      if (!Array.isArray(models) || models.length === 0) {
+        logger.infoFile(`[${this.flavor.agentId}] get_available_models returned no models; retaining the last available model list`);
+        this.settleModelDiscovery(false);
+        return;
+      }
+      this.pendingModelObservation = { models, observedAt: Date.now() };
+      this.publishPendingModelObservation();
+    }).catch((error: unknown) => {
+      logger.infoFile(`[${this.flavor.agentId}] get_available_models failed: ${asError(error).message}`);
+      this.settleModelDiscovery(false);
+    });
+  }
+
   private publishRuntimeState(state: PiRpcStateData): void {
     const modelRecord = asRecord(state.model);
     const currentModelIdRaw = asNonEmptyString(modelRecord?.id) ?? '';
@@ -3332,7 +3400,7 @@ export class PiRpcBackend implements AgentBackend {
     if (currentModelProvider) {
       this.currentModelProvider = currentModelProvider;
     }
-    this.currentThinkingLevel = normalizePiThinkingEffort(state.thinkingLevel) ?? 'medium';
+    this.currentThinkingLevel = normalizePiThinkingEffort(state.thinkingLevel, this.flavor.id) ?? 'medium';
 
     const normalized: Array<{ id: string; name: string; description: string; modelOptions?: unknown[] }> =
       (this.sessionModelState?.availableModels ?? []).map((m) => ({
@@ -3373,6 +3441,7 @@ export class PiRpcBackend implements AgentBackend {
 
     this.modelRuntimeStateReady = true;
     this.publishPendingModelObservation();
+    this.requestRpcModelCatalog(isCurrentPublication);
 
     this.availableCommandsKnownForCurrentPublication = false;
     const availableCommandsRefresh = this.getCommands({ processAlreadyEnsured: true }).then((commands) => {

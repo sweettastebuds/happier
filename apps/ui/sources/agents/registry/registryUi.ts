@@ -21,6 +21,8 @@ import { GROK_UI } from '@/agents/providers/grok/ui';
 import { FX_UI } from '@/agents/providers/fx/ui';
 import { DROID_UI } from '@/agents/providers/droid/ui';
 import { CODEBUDDY_UI } from '@/agents/providers/codebuddy/ui';
+import { OMP_UI } from '@/agents/providers/omp/ui';
+import { HERMES_UI } from '@/agents/providers/hermes/ui';
 import { AGY_UI } from '@/agents/providers/agy/ui';
 
 export type AgentIconSvgXmlResolver = (
@@ -72,6 +74,8 @@ export const AGENTS_UI: Readonly<Record<AgentId, AgentUiConfig>> = Object.freeze
     fx: FX_UI,
     droid: DROID_UI,
     codebuddy: CODEBUDDY_UI,
+    omp: OMP_UI,
+    hermes: HERMES_UI,
     agy: AGY_UI,
 });
 

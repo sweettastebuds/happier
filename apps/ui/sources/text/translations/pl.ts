@@ -4157,6 +4157,7 @@ export const pl: TranslationStructure = {
           `Zainstaluj ponownie ${provider} CLI`,
         autoInstallUnavailable:
           "Automatyczna instalacja nie jest dostępna dla tej maszyny.",
+        notManaged: ({ provider, url }: { provider: string; url: string }) => `Happier nie zarządza CLI ${provider}. Zainstaluj je samodzielnie: ${url}`,
         installSubtitle:
           "Instaluje CLI dostawcy na wybranej maszynie (best-effort).",
         reinstallSubtitle:
@@ -4529,6 +4530,8 @@ export const pl: TranslationStructure = {
             fx: { title: "FX" },
             droid: { title: "Factory Droid" },
             codebuddy: { title: "CodeBuddy" },
+            omp: { title: "Oh My Pi" },
+            hermes: { title: "Hermes Agent" },
             grok: {
                 title: "Grok Build"
             },
@@ -6841,8 +6844,12 @@ export const pl: TranslationStructure = {
     fxSessionIdCopied: "ID sesji FX skopiowane do schowka",
     droidSessionId: "ID sesji Factory Droid",
     codebuddySessionId: "ID sesji CodeBuddy",
+    ompSessionId: "ID sesji Oh My Pi",
+    hermesSessionId: "ID sesji Hermes Agent",
     droidSessionIdCopied: "ID sesji Factory Droid skopiowane do schowka",
     codebuddySessionIdCopied: "ID sesji CodeBuddy skopiowane do schowka",
+    ompSessionIdCopied: "ID sesji Oh My Pi skopiowane do schowka",
+    hermesSessionIdCopied: "ID sesji Hermes Agent skopiowane do schowka",
     customAcpSessionId: "ID sesji niestandardowego ACP",
     grokSessionId: "ID sesji Grok",
     grokSessionIdCopied: "ID sesji Grok skopiowane do schowka",
@@ -7111,6 +7118,8 @@ export const pl: TranslationStructure = {
       fx: "FX",
       droid: "Factory Droid",
       codebuddy: "CodeBuddy",
+      omp: "Oh My Pi",
+      hermes: "Hermes Agent",
       customAcp: "Custom ACP",
       pi: "Pi",
       copilot: "Copilot",
@@ -7120,6 +7129,16 @@ export const pl: TranslationStructure = {
     auggieIndexingChip: {
       on: "Indeksowanie: włączone",
       off: "Indeksowanie: wyłączone",
+    },
+    hermesProfileChip: {
+      title: "Profil Hermes",
+      active: "Aktywny profil",
+      activeSubtitle: "Użyj profilu wybranego w Hermes",
+      currentlyActive: "Obecnie aktywny",
+      loading: "Ładowanie profili…",
+      error: "Nie udało się wyświetlić profili Hermes",
+      notInstalled: "Hermes nie jest zainstalowany na tym komputerze",
+      footer: "Profil jest ustalany przy starcie sesji i używany przy każdym jej wznowieniu.",
     },
       model: {
         title: "MODEL",
@@ -11621,6 +11640,8 @@ settingsSession: {
       fxSubtitleExperimental: "FX CLI (eksperymentalne)",
       droidSubtitleExperimental: "Factory Droid CLI (eksperymentalne)",
       codebuddySubtitleExperimental: "CodeBuddy Code CLI (eksperymentalne)",
+      ompSubtitleExperimental: "Oh My Pi CLI (eksperymentalne)",
+      hermesSubtitleExperimental: "Hermes Agent CLI (eksperymentalne)",
       customAcpSubtitleExperimental: "Niestandardowy ACP CLI (eksperymentalne)",
       grokSubtitleExperimental: "Grok Build CLI (eksperymentalne)",
       piSubtitleExperimental: "Pi CLI (eksperymentalne)",

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractShellCommand, isToolAllowedForSession, makeToolIdentifier } from './permissionToolIdentifier';
+import { extractShellCommand, isToolAllowedForSession, makeSessionGrantIdentifier, makeToolIdentifier } from './permissionToolIdentifier';
 
 describe('permissionToolIdentifier', () => {
   it('extracts command from bash -lc wrapper arrays', () => {
@@ -127,5 +127,13 @@ describe('permissionToolIdentifier', () => {
   it('allows pipelines when each segment is allowed', () => {
     const allowed = new Set(['execute(git:*)', 'execute(cat:*)']);
     expect(isToolAllowedForSession(allowed, 'bash', { command: 'git diff | cat' })).toBe(true);
+  });
+
+  it('does not record a literal command ending in :* as a session grant, which would read back as a prefix grant', () => {
+    expect(makeSessionGrantIdentifier('bash', { command: 'rm:*' })).toBeNull();
+    expect(makeSessionGrantIdentifier('bash', { command: 'git status' })).toBe('bash(git status)');
+    expect(makeSessionGrantIdentifier('Edit', { path: '/a:*' })).toBe('Edit');
+    // Genuine prefix grants (from the UI/settings allowlist) keep working.
+    expect(isToolAllowedForSession(['Bash(git:*)'], 'bash', { command: 'git status' })).toBe(true);
   });
 });

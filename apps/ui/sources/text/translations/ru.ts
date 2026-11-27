@@ -4077,6 +4077,7 @@ export const ru: TranslationStructure = {
       reinstallTitle: ({ provider }: { provider: string }) =>
         `Переустановить ${provider} CLI`,
       autoInstallUnavailable: "Авто-установка недоступна для этой машины.",
+      notManaged: ({ provider, url }: { provider: string; url: string }) => `Happier не управляет CLI ${provider}. Установите её самостоятельно: ${url}`,
       installSubtitle:
         "Устанавливает CLI провайдера на выбранной машине (best-effort).",
       reinstallSubtitle:
@@ -4449,6 +4450,8 @@ export const ru: TranslationStructure = {
             fx: { title: "FX" },
             droid: { title: "Factory Droid" },
             codebuddy: { title: "CodeBuddy" },
+            omp: { title: "Oh My Pi" },
+            hermes: { title: "Hermes Agent" },
             grok: {
                 title: "Grok Build"
             },
@@ -5765,8 +5768,12 @@ export const ru: TranslationStructure = {
     fxSessionIdCopied: "ID сессии FX скопирован в буфер обмена",
     droidSessionId: "ID сессии Factory Droid",
     codebuddySessionId: "ID сессии CodeBuddy",
+    ompSessionId: "ID сессии Oh My Pi",
+    hermesSessionId: "ID сессии Hermes Agent",
     droidSessionIdCopied: "ID сессии Factory Droid скопирован в буфер обмена",
     codebuddySessionIdCopied: "ID сессии CodeBuddy скопирован в буфер обмена",
+    ompSessionIdCopied: "ID сессии Oh My Pi скопирован в буфер обмена",
+    hermesSessionIdCopied: "ID сессии Hermes Agent скопирован в буфер обмена",
     customAcpSessionId: "ID пользовательской ACP-сессии",
     grokSessionId: "ID сессии Grok",
     grokSessionIdCopied: "ID сессии Grok скопирован в буфер обмена",
@@ -7094,6 +7101,8 @@ export const ru: TranslationStructure = {
       fx: "FX",
       droid: "Factory Droid",
       codebuddy: "CodeBuddy",
+      omp: "Oh My Pi",
+      hermes: "Hermes Agent",
       customAcp: "Пользовательский АКП",
       pi: "Pi",
       copilot: "Copilot",
@@ -7103,6 +7112,16 @@ export const ru: TranslationStructure = {
     auggieIndexingChip: {
       on: "Индексация включена",
       off: "Индексация выключена",
+    },
+    hermesProfileChip: {
+      title: "Профиль Hermes",
+      active: "Активный профиль",
+      activeSubtitle: "Использовать профиль, выбранный в Hermes",
+      currentlyActive: "Сейчас активен",
+      loading: "Загрузка профилей…",
+      error: "Не удалось получить список профилей Hermes",
+      notInstalled: "Hermes не установлен на этой машине",
+      footer: "Профиль фиксируется при запуске сессии и используется при каждом возобновлении.",
     },
       model: {
         title: "МОДЕЛЬ",
@@ -11531,6 +11550,8 @@ settingsSession: {
       fxSubtitleExperimental: "FX CLI (экспериментально)",
       droidSubtitleExperimental: "Factory Droid CLI (экспериментально)",
       codebuddySubtitleExperimental: "CodeBuddy Code CLI (экспериментально)",
+      ompSubtitleExperimental: "Oh My Pi CLI (экспериментально)",
+      hermesSubtitleExperimental: "Hermes Agent CLI (экспериментально)",
       customAcpSubtitleExperimental: "Пользовательский ACP CLI (экспериментально)",
       grokSubtitleExperimental: "Grok Build CLI (экспериментально)",
       piSubtitleExperimental: "Pi CLI (экспериментально)",

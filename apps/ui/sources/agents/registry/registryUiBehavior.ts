@@ -27,6 +27,7 @@ import { AUGGIE_UI_BEHAVIOR_OVERRIDE } from '@/agents/providers/auggie/uiBehavio
 import { OPENCODE_UI_BEHAVIOR_OVERRIDE } from '@/agents/providers/opencode/uiBehavior';
 import { PI_UI_BEHAVIOR_OVERRIDE } from '@/agents/providers/pi/uiBehavior';
 import { AGY_UI_BEHAVIOR_OVERRIDE } from '@/agents/providers/agy/uiBehavior';
+import { HERMES_UI_BEHAVIOR_OVERRIDE } from '@/agents/providers/hermes/uiBehavior';
 import { CUSTOM_ACP_UI_BEHAVIOR_OVERRIDE } from '@/agents/providers/customAcp/uiBehavior';
 import type { AgentInputExtraActionChip } from '@/components/sessions/agentInput';
 import { isAcpSessionListingDeclared, resolveAgentIdFromSessionMetadata } from '@happier-dev/agents';
@@ -159,11 +160,7 @@ export type AgentUiBehavior = Readonly<{
             agentOptionState?: Record<string, unknown> | null;
         }) => Record<string, unknown> | null;
         canSelectWithoutDetectedCli?: (ctx: NewSessionCliSelectabilityContext) => boolean;
-        getAgentInputExtraActionChips?: (ctx: {
-            agentId: AgentId;
-            agentOptionState?: Record<string, unknown> | null;
-            setAgentOptionState: (key: string, value: unknown) => void;
-        }) => ReadonlyArray<AgentInputExtraActionChip> | undefined;
+        getAgentInputExtraActionChips?: (ctx: NewSessionAgentInputExtraActionChipsContext) => ReadonlyArray<AgentInputExtraActionChip> | undefined;
         supportsTranscriptStorageMode?: (ctx: {
             agentId: AgentId;
             settings: Settings;
@@ -264,6 +261,15 @@ export type AgentUiBehavior = Readonly<{
         }) => ReactNode | null;
         getDetailsTabIconName?: (ctx: { tab: DetailsTab }) => string | null;
     }>;
+}>;
+
+export type NewSessionAgentInputExtraActionChipsContext = Readonly<{
+    agentId: AgentId;
+    agentOptionState?: Record<string, unknown> | null;
+    setAgentOptionState: (key: string, value: unknown) => void;
+    /** The machine (and the server it is reached through) the session will start on, for options the machine defines. */
+    machineId?: string | null;
+    serverId?: string | null;
 }>;
 
 export type NewSessionPreflightContext = Readonly<{
@@ -395,6 +401,7 @@ const AGENTS_UI_BEHAVIOR_OVERRIDES: Readonly<Partial<Record<AgentId, AgentUiBeha
     pi: PI_UI_BEHAVIOR_OVERRIDE,
     customAcp: CUSTOM_ACP_UI_BEHAVIOR_OVERRIDE,
     agy: AGY_UI_BEHAVIOR_OVERRIDE,
+    hermes: HERMES_UI_BEHAVIOR_OVERRIDE,
 });
 
 export const AGENTS_UI_BEHAVIOR: Readonly<Record<AgentId, AgentUiBehavior>> = Object.freeze(
@@ -492,11 +499,7 @@ export function canSelectAgentWithoutDetectedCli(ctx: NewSessionCliSelectability
     return fn ? fn(ctx) : false;
 }
 
-export function getNewSessionAgentInputExtraActionChips(opts: {
-    agentId: AgentId;
-    agentOptionState?: Record<string, unknown> | null;
-    setAgentOptionState: (key: string, value: unknown) => void;
-}): ReadonlyArray<AgentInputExtraActionChip> | undefined {
+export function getNewSessionAgentInputExtraActionChips(opts: NewSessionAgentInputExtraActionChipsContext): ReadonlyArray<AgentInputExtraActionChip> | undefined {
     const fn = AGENTS_UI_BEHAVIOR[opts.agentId].newSession?.getAgentInputExtraActionChips;
     return fn ? fn(opts) : undefined;
 }

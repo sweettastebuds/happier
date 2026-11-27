@@ -1531,6 +1531,8 @@ export const ja: TranslationStructure = {
       fxSubtitleExperimental: "FX CLI（実験）",
       droidSubtitleExperimental: "Factory Droid CLI（実験）",
       codebuddySubtitleExperimental: "CodeBuddy Code CLI（実験）",
+      ompSubtitleExperimental: "Oh My Pi CLI（実験）",
+      hermesSubtitleExperimental: "Hermes Agent CLI（実験）",
       customAcpSubtitleExperimental: "カスタム ACP CLI（実験）",
       grokSubtitleExperimental: "Grok Build CLI（実験）",
       piSubtitleExperimental: "Pi CLI（実験）",
@@ -4425,6 +4427,7 @@ localTailscale: {
         installTitle: ({ provider }: { provider: string }) => `${provider} CLI をインストール`,
         reinstallTitle: ({ provider }: { provider: string }) => `${provider} CLI を再インストール`,
         autoInstallUnavailable: "このマシンでは自動インストールを利用できません。",
+        notManaged: ({ provider, url }: { provider: string; url: string }) => `Happier は ${provider} CLI を管理しません。ご自身でインストールしてください: ${url}`,
         installSubtitle:
           "選択したマシンにプロバイダー CLI をインストールします（ベストエフォート）。",
         reinstallSubtitle:
@@ -4797,6 +4800,8 @@ localTailscale: {
             fx: { title: "FX" },
             droid: { title: "Factory Droid" },
             codebuddy: { title: "CodeBuddy" },
+            omp: { title: "Oh My Pi" },
+            hermes: { title: "Hermes Agent" },
             grok: {
                 title: "Grok Build"
             },
@@ -7103,8 +7108,12 @@ localTailscale: {
     fxSessionIdCopied: "FX セッション ID をクリップボードにコピーしました",
     droidSessionId: "Factory Droid セッション ID",
     codebuddySessionId: "CodeBuddy セッション ID",
+    ompSessionId: "Oh My Pi セッション ID",
+    hermesSessionId: "Hermes Agent セッション ID",
     droidSessionIdCopied: "Factory Droid セッション ID をクリップボードにコピーしました",
     codebuddySessionIdCopied: "CodeBuddy セッション ID をクリップボードにコピーしました",
+    ompSessionIdCopied: "Oh My Pi セッション ID をクリップボードにコピーしました",
+    hermesSessionIdCopied: "Hermes Agent セッション ID をクリップボードにコピーしました",
     customAcpSessionId: "カスタム ACP セッション ID",
     grokSessionId: "Grok セッション ID",
     grokSessionIdCopied: "Grok セッション ID をクリップボードにコピーしました",
@@ -7372,6 +7381,8 @@ localTailscale: {
       fx: "FX",
       droid: "Factory Droid",
       codebuddy: "CodeBuddy",
+      omp: "Oh My Pi",
+      hermes: "Hermes Agent",
       customAcp: "カスタム ACP",
       pi: "Pi",
       copilot: "Copilot",
@@ -7381,6 +7392,16 @@ localTailscale: {
     auggieIndexingChip: {
       on: "インデックス有効",
       off: "インデックス無効",
+    },
+    hermesProfileChip: {
+      title: "Hermes プロファイル",
+      active: "アクティブなプロファイル",
+      activeSubtitle: "Hermes で選択されているプロファイルを使用",
+      currentlyActive: "現在アクティブ",
+      loading: "プロファイルを読み込み中…",
+      error: "Hermes のプロファイルを取得できませんでした",
+      notInstalled: "このマシンには Hermes がインストールされていません",
+      footer: "プロファイルはセッション開始時に固定され、再開するたびに使用されます。",
     },
     model: {
       title: "モデル",

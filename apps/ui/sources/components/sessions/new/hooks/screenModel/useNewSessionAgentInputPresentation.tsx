@@ -235,6 +235,7 @@ export function useNewSessionAgentInputPresentation(params: Readonly<{
         agentId: params.agentType,
         agentOptionState: params.agentOptionState,
         setAgentOptionState: params.setAgentOptionStateForCurrentAgent,
+        selectedMachineId: params.selectedMachineId,
         connectedServicesAuthChip: params.connectedServicesAuthChip,
         showAutomationActionChips: params.showAutomationActionChips,
         automationDraft: params.effectiveAutomationDraft,

@@ -3,13 +3,14 @@ import * as React from 'react';
 import type { AgentId } from '@/agents/catalog/catalog';
 import { machineCapabilitiesInvoke } from '@/sync/ops';
 import type { CapabilityId, CapabilitiesInvokeResponse } from '@/sync/api/capabilities/capabilitiesProtocol';
+import { isProviderCliInstallManaged } from '@happier-dev/agents';
 
 export type ProviderCliInstallStatus = 'idle' | 'queued' | 'installing' | 'installed' | 'failed';
 
 export type ProviderCliInstallResult = Readonly<{
     status: ProviderCliInstallStatus;
     logPath: string | null;
-    failureReason: 'not-supported' | 'error' | 'invoke-error' | null;
+    failureReason: 'not-supported' | 'error' | 'invoke-error' | 'not-managed' | null;
 }>;
 
 export type ProviderCliInstallQueueSummary = Readonly<{
@@ -115,6 +116,12 @@ export function useProviderCliInstallQueue(params: Readonly<{
                 continue;
             }
 
+            if (!isProviderCliInstallManaged(providerId)) {
+                setStatus(providerId, { status: 'failed', logPath: null, failureReason: 'not-managed' });
+                failedProviderIds.push(providerId);
+                continue;
+            }
+
             setStatus(providerId, { status: 'installing', logPath: null, failureReason: null });
 
             let result: { ok: true; response: CapabilitiesInvokeResponse } | { ok: false; reason: 'not-supported' | 'error' };
@@ -147,7 +154,11 @@ export function useProviderCliInstallQueue(params: Readonly<{
             }
 
             if (!result.response.ok) {
-                setStatus(providerId, { status: 'failed', logPath: result.response.logPath ?? null, failureReason: 'invoke-error' });
+                setStatus(providerId, {
+                    status: 'failed',
+                    logPath: result.response.logPath ?? null,
+                    failureReason: result.response.error.code === 'install-not-available' ? 'not-managed' : 'invoke-error',
+                });
                 failedProviderIds.push(providerId);
                 continue;
             }

@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { createEnvKeyScope } from '@/testkit/env/envScope';
 import { writeExecutableShimSync } from '@/testkit/fs/executableShim';
 import { createTempDirSync, removeTempDirSync } from '@/testkit/fs/tempDir';
-import { buildPiRpcArgs, buildPiToolsForPermissionMode, createPiBackend, resolveHappyBridgeExtensionArgs } from './backend';
+import { buildOmpRpcArgs, buildPiRpcArgs, buildPiToolsForPermissionMode, createPiBackend, resolveHappyBridgeExtensionArgs } from './backend';
 import { HAPPIER_CONNECTED_SERVICE_SELECTIONS_ENV_KEY } from '@/daemon/connectedServices/connectedServiceChildEnvironment';
 import {
   PI_BROKER_SELECTIONS_ENV,
@@ -332,5 +332,28 @@ describe('buildPiRpcArgs', () => {
       '--tools',
       tools,
     ]);
+  });
+});
+
+describe('buildOmpRpcArgs', () => {
+  it.each([
+    { mode: undefined, approval: 'always-ask' },
+    { mode: 'default', approval: 'always-ask' },
+    { mode: 'read-only', approval: 'always-ask' },
+    { mode: 'plan', approval: 'always-ask' },
+    { mode: 'safe-yolo', approval: 'write' },
+    { mode: 'acceptEdits', approval: 'write' },
+    { mode: 'yolo', approval: 'yolo' },
+    { mode: 'bypassPermissions', approval: 'yolo' },
+    { mode: 'not-a-mode', approval: 'always-ask' },
+  ] as const)('maps permission mode $mode to --approval-mode $approval without a tools allowlist', ({ mode, approval }) => {
+    const args = buildOmpRpcArgs({ permissionMode: mode as never });
+    expect(args).toEqual(['--mode', 'rpc-ui', '--approval-mode', approval]);
+    expect(args).not.toContain('--tools');
+  });
+
+  it('passes omp-only thinking levels and drops unknown ones', () => {
+    expect(buildOmpRpcArgs({ thinkingLevel: 'max' })).toContain('max');
+    expect(buildOmpRpcArgs({ thinkingLevel: 'ultra' })).not.toContain('--thinking');
   });
 });

@@ -157,6 +157,21 @@ describe('agents/registryCore', () => {
         });
     });
 
+    it.each([
+        ['omp', 'ompSessionId'],
+        ['hermes', 'hermesSessionId'],
+    ] as const)('provides %s as an experimental resumable non-ACP agent without bridge tools', (agentId, resumeField) => {
+        expect(getAgentCore(agentId)).toMatchObject({
+            id: agentId,
+            availability: { experimental: true },
+            cli: { detectKey: agentId, machineLoginKey: agentId, spawnAgent: agentId },
+            sessionModes: { kind: 'none' },
+            resume: { vendorResumeIdField: resumeField, supportsVendorResume: true },
+            sessionStorage: { direct: false, persisted: true },
+            tools: { delivery: 'unsupported', support: 'unsupported' },
+        });
+    });
+
     it('provides Agy as a managed, resumable ACP agent while keeping the interactive CLI distinct', () => {
         expect(getAgentCore('agy')).toMatchObject({
             id: 'agy',

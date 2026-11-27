@@ -992,6 +992,34 @@ describe('runStandardAcpProvider', () => {
     expect(loadTerminalDisplay).not.toHaveBeenCalled();
   });
 
+  it('tells a user-started session without a TTY that it is logs-only, and stays quiet for daemon-started ones', async () => {
+    const stdoutDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: false });
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: false });
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    try {
+      const daemonHarness = createHarness();
+      daemonHarness.opts.startedBy = 'daemon';
+      await runStandardAcpProvider(daemonHarness.opts, daemonHarness.config, daemonHarness.deps);
+      expect(write).not.toHaveBeenCalled();
+
+      const terminalHarness = createHarness();
+      terminalHarness.opts.startedBy = 'terminal';
+      await runStandardAcpProvider(terminalHarness.opts, terminalHarness.config, terminalHarness.deps);
+      const output = write.mock.calls.map((call) => String(call[0])).join('');
+      expect(output).toContain('Logs only');
+      expect(output).toContain('session-1');
+    } finally {
+      write.mockRestore();
+      if (stdoutDescriptor) Object.defineProperty(process.stdout, 'isTTY', stdoutDescriptor);
+      else delete (process.stdout as { isTTY?: boolean }).isTTY;
+      if (stdinDescriptor) Object.defineProperty(process.stdin, 'isTTY', stdinDescriptor);
+      else delete (process.stdin as { isTTY?: boolean }).isTTY;
+    }
+  });
+
   it('skips loading and rendering the terminal UI when the provider disables it', async () => {
     const harness = createHarness();
     const renderFn = vi.fn(() => ({ unmount: vi.fn() }));

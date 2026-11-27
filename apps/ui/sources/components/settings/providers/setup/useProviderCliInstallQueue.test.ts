@@ -95,4 +95,41 @@ describe('useProviderCliInstallQueue', () => {
         expect(hook.getCurrent().resolveStatus('claude').status).toBe('installed');
         expect(capabilitiesState.invoke).toHaveBeenCalledTimes(2);
     });
+    it('marks a provider without a managed install recipe as not-managed without invoking install', async () => {
+        const hook = await renderHook(() => useProviderCliInstallQueue({
+            machineId: 'machine-1',
+            serverId: 'server-a',
+            providerIds: ['hermes'],
+            providerDetectKeys: { hermes: 'hermes' },
+            installedByProviderId: { hermes: false },
+        }));
+
+        await act(async () => {
+            await hook.getCurrent().start();
+        });
+
+        expect(capabilitiesState.invoke).not.toHaveBeenCalled();
+        expect(hook.getCurrent().resolveStatus('hermes')).toMatchObject({ status: 'failed', failureReason: 'not-managed' });
+    });
+
+    it('maps the daemon install-not-available refusal to not-managed', async () => {
+        capabilitiesState.invoke.mockResolvedValueOnce({
+            supported: true,
+            response: { ok: false, error: { code: 'install-not-available', message: 'No auto-install recipe' } },
+        });
+
+        const hook = await renderHook(() => useProviderCliInstallQueue({
+            machineId: 'machine-1',
+            serverId: 'server-a',
+            providerIds: ['codex'],
+            providerDetectKeys: { codex: 'codex' },
+            installedByProviderId: { codex: false },
+        }));
+
+        await act(async () => {
+            await hook.getCurrent().start();
+        });
+
+        expect(hook.getCurrent().resolveStatus('codex').failureReason).toBe('not-managed');
+    });
 });

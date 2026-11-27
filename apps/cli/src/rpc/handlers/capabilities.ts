@@ -346,6 +346,13 @@ async function invokeProviderCliInstall(
         });
 
         if (!preview.ok) {
+            // Refused-by-design installs (no recipe, confirmation required) never write a provider-installs log,
+            // so record the refusal in the daemon log. Dry-run probes (settings page installability checks) stay silent.
+            logger.infoFile('[capabilities] Provider CLI install refused', {
+                agentId,
+                errorCode: preview.errorCode,
+                errorMessage: preview.errorMessage,
+            });
             return {
                 ok: false,
                 error: { message: preview.errorMessage, code: preview.errorCode },

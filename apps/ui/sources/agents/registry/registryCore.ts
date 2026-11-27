@@ -1,3 +1,4 @@
+import type { PermissionMode } from '@happier-dev/agents';
 import type { ModelMode } from '@/sync/domains/permissions/permissionTypes';
 import type { TranslationKey, TranslationKeyNoParams } from '@/text';
 import type { Href } from 'expo-router';
@@ -35,6 +36,8 @@ import { AGY_CORE } from '@/agents/providers/agy/core';
 import { FX_CORE } from '@/agents/providers/fx/core';
 import { DROID_CORE } from '@/agents/providers/droid/core';
 import { CODEBUDDY_CORE } from '@/agents/providers/codebuddy/core';
+import { OMP_CORE } from '@/agents/providers/omp/core';
+import { HERMES_CORE } from '@/agents/providers/hermes/core';
 
 export type { AgentId };
 
@@ -120,6 +123,11 @@ export type AgentCoreConfig = Readonly<{
     }>;
     permissions: Readonly<{
         modeGroup: PermissionModeGroupId;
+        /**
+         * Restricts the group's modes to those the provider can honour (default: every mode of the group).
+         * Unsupported modes are not offered and normalize to `default`.
+         */
+        supportedModes?: readonly PermissionMode[];
         promptProtocol: PermissionPromptProtocol;
     }>;
     sessionModes: Readonly<{
@@ -234,6 +242,8 @@ export const AGENTS_CORE = Object.freeze({
     fx: FX_CORE,
     droid: DROID_CORE,
     codebuddy: CODEBUDDY_CORE,
+    omp: OMP_CORE,
+    hermes: HERMES_CORE,
     agy: AGY_CORE,
 }) satisfies Readonly<Record<string, AgentCoreConfig>>;
 

@@ -26,7 +26,9 @@ import {
     skipActiveProviderSetupStep,
     type ProviderSetupQueueState,
 } from './providerSetupQueue';
-import { useProviderCliInstallQueue, type ProviderCliInstallStatus } from './useProviderCliInstallQueue';
+import { useProviderCliInstallQueue, type ProviderCliInstallResult } from './useProviderCliInstallQueue';
+import { getProviderCliInstallGuideUrl, isProviderCliInstallManaged } from '@happier-dev/agents';
+import { openExternalUrl } from '@/utils/url/openExternalUrl';
 import { Icon } from '@/components/ui/icons/Icon';
 
 const DEFAULT_PROVIDER_IDS = AGENT_IDS.filter((agentId) => agentId !== 'customAcp');
@@ -49,7 +51,16 @@ function buildProviderStepDetail(stepState: 'idle' | 'active' | 'done' | 'skippe
     return undefined;
 }
 
-function buildInstallStepDetail(stepState: ProviderCliInstallStatus): string | undefined {
+function buildNotManagedDetail(providerId: AgentId): string {
+    return t('settingsProviders.cliInstaller.notManaged', {
+        provider: t(getAgentCore(providerId).displayNameKey),
+        url: getProviderCliInstallGuideUrl(providerId) ?? '',
+    });
+}
+
+function buildInstallStepDetail(providerId: AgentId, result: ProviderCliInstallResult): string | undefined {
+    const stepState = result.status;
+    if (stepState === 'failed' && result.failureReason === 'not-managed') return buildNotManagedDetail(providerId);
     if (stepState === 'queued') return t('settingsNotifications.badges.queuedTitle');
     if (stepState === 'installing') return t('settingsProviders.setup.activeStatus');
     if (stepState === 'installed') return t('settingsProviders.cliInstaller.installed');
@@ -74,7 +85,7 @@ export const ProviderSetupFlow = React.memo(function ProviderSetupFlow(props: Re
     const machine = useMachine(machineId ?? '');
     const machineLabel = machine?.metadata?.displayName ?? machine?.metadata?.host ?? machineId ?? t('machine.detectedCliUnknown');
 
-    const [selectedProviderIds, setSelectedProviderIds] = React.useState<AgentId[]>(() => [...providerIds]);
+    const [selectedProviderIds, setSelectedProviderIds] = React.useState<AgentId[]>(() => providerIds.filter(isProviderCliInstallManaged));
     const [queueState, setQueueState] = React.useState<ProviderSetupQueueState | null>(null);
     const [terminalAuthSelection, setTerminalAuthSelection] = React.useState<Readonly<{
         providerId: AgentId;
@@ -84,7 +95,7 @@ export const ProviderSetupFlow = React.memo(function ProviderSetupFlow(props: Re
     React.useEffect(() => {
         setSelectedProviderIds((previous) => {
             const next = providerIds.filter((providerId) => previous.includes(providerId));
-            return next.length > 0 ? next : [...providerIds];
+            return next.length > 0 ? next : providerIds.filter(isProviderCliInstallManaged);
         });
     }, [providerIds]);
 
@@ -121,6 +132,11 @@ export const ProviderSetupFlow = React.memo(function ProviderSetupFlow(props: Re
 
     const toggleProvider = React.useCallback((providerId: AgentId) => {
         if (queueState || installQueue.state.hasStarted) return;
+        if (!isProviderCliInstallManaged(providerId)) {
+            const guideUrl = getProviderCliInstallGuideUrl(providerId);
+            if (guideUrl) void openExternalUrl(guideUrl);
+            return;
+        }
         setSelectedProviderIds((previous) => {
             if (previous.includes(providerId)) {
                 return previous.filter((entry) => entry !== providerId);
@@ -148,14 +164,20 @@ export const ProviderSetupFlow = React.memo(function ProviderSetupFlow(props: Re
                     const core = getAgentCore(providerId);
                     const selected = selectedProviderIds.includes(providerId);
                     const stepState = resolveProviderStepState({ providerId, queueState });
-                    const installStatus = installQueue.resolveStatus(providerId).status;
-                    const canRetryInstall = installQueue.state.hasStarted && !installQueue.state.isRunning && installStatus === 'failed';
+                    const installResult = installQueue.resolveStatus(providerId);
+                    const installStatus = installResult.status;
+                    const managedInstallable = isProviderCliInstallManaged(providerId);
+                    const canRetryInstall = installQueue.state.hasStarted && !installQueue.state.isRunning && installStatus === 'failed' && managedInstallable;
                     return (
                         <Item
                             key={providerId}
                             testID={`provider-setup-option-${providerId}`}
                             title={t(core.displayNameKey)}
-                            subtitle={installQueue.state.hasStarted ? buildInstallStepDetail(installStatus) : buildProviderStepDetail(stepState)}
+                            subtitle={!managedInstallable
+                                ? buildNotManagedDetail(providerId)
+                                : installQueue.state.hasStarted
+                                    ? buildInstallStepDetail(providerId, installResult)
+                                    : buildProviderStepDetail(stepState)}
                             selected={selected}
                             showChevron={false}
                             disabled={installQueue.state.hasStarted ? (installQueue.state.isRunning || !canRetryInstall) : Boolean(queueState)}

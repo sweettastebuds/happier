@@ -218,6 +218,24 @@ function codebuddySvg(theme: Theme): string {
     );
 }
 
+function ompSvg(theme: Theme): string {
+    // Neutral Happier-drawn monogram (a ring); not a vendor brand asset.
+    return monochrome(
+        theme.colors.text.primary,
+        `<path fill-rule="evenodd" d="M50 6a44 44 0 1 0 0 88a44 44 0 1 0 0-88Zm0 16a28 28 0 1 1 0 56a28 28 0 1 1 0-56Z"/>`,
+        '0 0 100 100',
+    );
+}
+
+function hermesSvg(theme: Theme): string {
+    // Neutral Happier-drawn monogram (an "H"); not a vendor brand asset.
+    return monochrome(
+        theme.colors.text.primary,
+        `<path d="M18 10h18v32h28V10h18v80H64V58H36v32H18Z"/>`,
+        '0 0 100 100',
+    );
+}
+
 function cursorSvg(theme: Theme): string {
     // Cursor mark from the official light SVG asset, rendered monochrome for theme consistency.
     return monochrome(
@@ -275,4 +293,6 @@ export const PROVIDER_LOGO_SVG_XML: Partial<Record<AgentId, AgentIconSvgXmlResol
     fx: fxSvg,
     droid: droidSvg,
     codebuddy: codebuddySvg,
+    omp: ompSvg,
+    hermes: hermesSvg,
 };
