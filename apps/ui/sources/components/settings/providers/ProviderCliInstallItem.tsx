@@ -6,14 +6,17 @@ import { Item } from '@/components/ui/lists/Item';
 import type { CapabilityInstallability } from '@/hooks/machine/useCapabilityInstallability';
 import { useMachineCapabilityInvokeWithAlerts } from '@/hooks/machine/useMachineCapabilityInvokeWithAlerts';
 import { Modal } from '@/modal';
+import type { AgentId } from '@/agents/catalog/catalog';
 import type { CapabilityId } from '@/sync/api/capabilities/capabilitiesProtocol';
 import { t } from '@/text';
 import { Icon } from '@/components/ui/icons/Icon';
+import { getProviderCliInstallGuideUrl } from '@happier-dev/agents';
 
 export type ProviderCliInstallItemProps = Readonly<{
     machineId: string | null;
     serverId?: string | null;
     capabilityId: Extract<CapabilityId, `cli.${string}`>;
+    providerId: AgentId;
     providerTitle: string;
     installed: boolean | null;
     managedInstalled?: boolean;
@@ -30,7 +33,15 @@ export function ProviderCliInstallItem(props: ProviderCliInstallItemProps) {
         : t('settingsProviders.cliInstaller.reinstallTitle', { provider: props.providerTitle });
     const installabilityKind = props.installability?.kind ?? 'unknown';
     const autoInstallAvailable = installabilityKind !== 'not-installable';
-    const subtitle = !autoInstallAvailable
+    const notManagedMessage = t('settingsProviders.cliInstaller.notManaged', {
+        provider: props.providerTitle,
+        url: getProviderCliInstallGuideUrl(props.providerId) ?? '',
+    });
+    const notManaged = props.installability?.kind === 'not-installable'
+        && props.installability.code === 'install-not-available';
+    const subtitle = notManaged
+        ? notManagedMessage
+        : !autoInstallAvailable
         ? t('settingsProviders.cliInstaller.autoInstallUnavailable')
         : skipIfInstalled
             ? t('settingsProviders.cliInstaller.installSubtitle')
@@ -83,6 +94,7 @@ export function ProviderCliInstallItem(props: ProviderCliInstallItemProps) {
                     timeoutMs: 5 * 60_000,
                     serverId: props.serverId,
                     alerts: {
+                        formatErrorMessage: (error) => error.code === 'install-not-available' ? notManagedMessage : error.message,
                         errorTitle: t('common.error'),
                         successTitle: t('common.success'),
                         unsupportedMessage: (reason) =>

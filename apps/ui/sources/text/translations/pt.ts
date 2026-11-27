@@ -4247,6 +4247,7 @@ export const pt: TranslationStructure = {
           `Reinstalar ${provider} CLI`,
         autoInstallUnavailable:
           "A instalação automática não está disponível para esta máquina.",
+        notManaged: ({ provider, url }: { provider: string; url: string }) => `O Happier não gerencia a CLI do ${provider}. Instale-a você mesmo: ${url}`,
         installSubtitle:
           "Instala o CLI do provedor na máquina selecionada (best-effort).",
         reinstallSubtitle:

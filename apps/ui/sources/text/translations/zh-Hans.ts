@@ -4017,6 +4017,7 @@ export const zhHans: TranslationStructure = {
       reinstallTitle: ({ provider }: { provider: string }) =>
         `重新安装 ${provider} CLI`,
       autoInstallUnavailable: "此机器不支持自动安装。",
+      notManaged: ({ provider, url }: { provider: string; url: string }) => `Happier 不管理 ${provider} CLI。请自行安装：${url}`,
       installSubtitle: "在所选机器上安装提供商 CLI（尽力而为）。",
       reinstallSubtitle: "即使已安装 CLI 也会重新运行安装器。",
       confirmInstallTitle: ({ provider }: { provider: string }) => `安装 ${provider} CLI？`,

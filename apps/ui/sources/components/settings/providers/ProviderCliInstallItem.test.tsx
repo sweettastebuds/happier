@@ -56,6 +56,7 @@ describe('ProviderCliInstallItem', () => {
         const screen = await renderScreen(React.createElement(ProviderCliInstallItem, {
                     machineId: 'm1',
                     capabilityId: 'cli.codex',
+                    providerId: 'codex',
                     providerTitle: 'Codex',
                     installed: false,
                 }));
@@ -80,6 +81,7 @@ describe('ProviderCliInstallItem', () => {
         const screen = await renderScreen(React.createElement(ProviderCliInstallItem, {
                     machineId: 'm1',
                     capabilityId: 'cli.codex',
+                    providerId: 'codex',
                     providerTitle: 'Codex',
                     installed: true,
                     managedInstalled: false,
@@ -105,6 +107,7 @@ describe('ProviderCliInstallItem', () => {
         const screen = await renderScreen(React.createElement(ProviderCliInstallItem, {
                     machineId: 'm1',
                     capabilityId: 'cli.codex',
+                    providerId: 'codex',
                     providerTitle: 'Codex',
                     installed: true,
                     managedInstalled: true,
@@ -129,6 +132,7 @@ describe('ProviderCliInstallItem', () => {
         const screen = await renderScreen(React.createElement(ProviderCliInstallItem, {
                     machineId: 'm1',
                     capabilityId: 'cli.codex',
+                    providerId: 'codex',
                     providerTitle: 'Codex',
                     installed: false,
                 }));
@@ -148,6 +152,7 @@ describe('ProviderCliInstallItem', () => {
         const screen = await renderScreen(React.createElement(ProviderCliInstallItem, {
             machineId: 'm1',
             capabilityId: 'cli.opencode',
+            providerId: 'opencode',
             providerTitle: 'OpenCode',
             installed: false,
             installability: { kind: 'not-installable' },

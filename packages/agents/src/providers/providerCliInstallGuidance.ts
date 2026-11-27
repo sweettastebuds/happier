@@ -61,6 +61,16 @@ function formatPlatformLabel(platforms: ReadonlyArray<ProviderCliInstallPlatform
     .join(', ');
 }
 
+/**
+ * True when Happier can install this provider CLI on at least one platform (a managed install or a recipe).
+ * The daemon still decides per platform and refuses with `no-recipe` when this machine has none.
+ */
+export function isProviderCliInstallManaged(providerId: AgentId): boolean {
+  const spec = getProviderCliRuntimeSpec(providerId);
+  if (spec.managedInstall) return true;
+  return Object.values(spec.manualInstallRecipes ?? {}).some((commands) => (commands?.length ?? 0) > 0);
+}
+
 export function getProviderCliInstallGuideUrl(providerId: AgentId): string | null {
   const spec = getProviderCliRuntimeSpec(providerId);
   return spec.installGuideUrl ?? spec.docsUrl ?? null;

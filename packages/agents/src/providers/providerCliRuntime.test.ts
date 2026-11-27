@@ -9,7 +9,7 @@ import {
   resolveProviderCliLatestVersionSource,
   resolveProviderCliNpmPackageName,
 } from './providerCliRuntime.js';
-import { getProviderCliManualInstallSummaryLines } from './providerCliInstallGuidance.js';
+import { getProviderCliManualInstallSummaryLines, isProviderCliInstallManaged } from './providerCliInstallGuidance.js';
 
 const cursorAgentId = 'cursor' as AgentId;
 
@@ -320,5 +320,15 @@ describe('PROVIDER_CLI_RUNTIME_SPECS', () => {
     expect(resolveProviderCliNpmPackageName(getProviderCliRuntimeSpec('codex'))).toBe('@openai/codex');
     expect(resolveProviderCliNpmPackageName(getProviderCliRuntimeSpec('gemini'))).toBe('@google/gemini-cli');
     expect(resolveProviderCliNpmPackageName(getProviderCliRuntimeSpec('cursor'))).toBeNull();
+  });
+});
+
+describe('isProviderCliInstallManaged', () => {
+  it('is true for managed installs and recipe-only providers, false when Happier has no install path', () => {
+    expect(isProviderCliInstallManaged('codex')).toBe(true);
+    expect(getProviderCliRuntimeSpec('claude').managedInstall).toBeNull();
+    expect(isProviderCliInstallManaged('claude')).toBe(true);
+    expect(isProviderCliInstallManaged('hermes')).toBe(false);
+    expect(isProviderCliInstallManaged('omp')).toBe(false);
   });
 });

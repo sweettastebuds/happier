@@ -22,6 +22,7 @@ import { CHECKLIST_IDS, resumeChecklistId } from '@happier-dev/protocol/checklis
 import { CODEX_ACP_DEP_ID } from '@happier-dev/protocol/installables';
 import { createEncryptedRpcTestClient } from './encryptedRpc.testkit';
 import { reloadConfiguration } from '@/configuration';
+import { logger } from '@/ui/logger';
 
 function createTestRpcManager(params?: { scopePrefix?: string }) {
     const scopePrefix = params?.scopePrefix ?? 'machine-test';
@@ -301,6 +302,28 @@ describe('registerCommonHandlers capabilities', () => {
             expect(result.error.code).toBe('install-not-available');
         } finally {
             await rm(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('records a daemon log line when an install request is refused because Happier has no install recipe', async () => {
+        const infoFile = vi.spyOn(logger, 'infoFile').mockImplementation(() => undefined);
+        try {
+            const { call } = createTestRpcManager({ scopePrefix: 'machine-test-provider-install-refused-log' });
+            const result = await call<CapabilitiesInvokeResponse, CapabilitiesInvokeRequest>(RPC_METHODS.CAPABILITIES_INVOKE, {
+                id: 'cli.hermes',
+                method: 'install',
+                params: { dryRun: false, allowVendorRecipeExecution: true },
+            });
+
+            expect(result.ok).toBe(false);
+            if (result.ok) return;
+            expect(result.error.code).toBe('install-not-available');
+            expect(infoFile).toHaveBeenCalledWith(
+                expect.stringContaining('Provider CLI install refused'),
+                expect.objectContaining({ agentId: 'hermes', errorCode: 'install-not-available' }),
+            );
+        } finally {
+            infoFile.mockRestore();
         }
     });
 

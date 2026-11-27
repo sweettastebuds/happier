@@ -620,6 +620,7 @@ const ProviderSettingsScreenInner = React.memo(function ProviderSettingsScreenIn
                         machineId={primaryMachine?.id ?? null}
                         serverId={capabilityServerId}
                         capabilityId={providerCliCapabilityId}
+                        providerId={providerId}
                         providerTitle={t(core.displayNameKey)}
                         installed={providerCliAvailable}
                         managedInstalled={providerCliManagedInstalled}

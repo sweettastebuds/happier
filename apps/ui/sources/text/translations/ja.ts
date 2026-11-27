@@ -4427,6 +4427,7 @@ localTailscale: {
         installTitle: ({ provider }: { provider: string }) => `${provider} CLI をインストール`,
         reinstallTitle: ({ provider }: { provider: string }) => `${provider} CLI を再インストール`,
         autoInstallUnavailable: "このマシンでは自動インストールを利用できません。",
+        notManaged: ({ provider, url }: { provider: string; url: string }) => `Happier は ${provider} CLI を管理しません。ご自身でインストールしてください: ${url}`,
         installSubtitle:
           "選択したマシンにプロバイダー CLI をインストールします（ベストエフォート）。",
         reinstallSubtitle:

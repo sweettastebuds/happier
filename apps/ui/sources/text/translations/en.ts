@@ -3837,6 +3837,7 @@ export const en = {
             installTitle: ({ provider }: { provider: string }) => `Install ${provider} CLI`,
             reinstallTitle: ({ provider }: { provider: string }) => `Reinstall ${provider} CLI`,
             autoInstallUnavailable: 'Auto-install is not available for this machine.',
+            notManaged: ({ provider, url }: { provider: string; url: string }) => `Happier does not manage the ${provider} CLI. Install it yourself: ${url}`,
             installSubtitle: 'Installs the provider CLI on the selected machine (best-effort).',
             reinstallSubtitle: 'Re-runs the provider installer even if the CLI is already present.',
             confirmInstallTitle: ({ provider }: { provider: string }) => `Install ${provider} CLI?`,

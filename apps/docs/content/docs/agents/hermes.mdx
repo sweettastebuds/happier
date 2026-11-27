@@ -11,10 +11,22 @@ This agent is experimental and ships in the next Happier version.
 
 ## What you need first
 
-Install Hermes from the
-[official repository](https://github.com/NousResearch/hermes-agent) and start
-your Hermes gateway yourself. Happier only connects to a gateway that is already
-running. It never starts, restarts, or stops one.
+Happier does not install Hermes for you. Install it yourself, then start your
+Hermes gateway. Happier only attaches to a gateway that is already running. It
+never starts, restarts, or stops one, so you must run your own gateway.
+
+On Linux and macOS, one way to install it is with [uv](https://docs.astral.sh/uv/):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv tool install hermes-agent
+```
+
+This puts `hermes`, `hermes-acp`, and `hermes-agent` in `~/.local/bin`, which
+Happier finds without any configuration. You can also use Hermes's own installer
+or, on Windows, the install path in the
+[official repository](https://github.com/NousResearch/hermes-agent).
 
 Happier asks the `hermes` CLI for a one-time connection ticket
 (`hermes -p <profile> gateway attach --json`) every time it connects. If no

@@ -3836,6 +3836,7 @@ export const fr: TranslationStructure = {
             installTitle: ({ provider }: { provider: string }) => `Installer ${provider} CLI`,
             reinstallTitle: ({ provider }: { provider: string }) => `Réinstaller ${provider} CLI`,
             autoInstallUnavailable: 'L’installation automatique n’est pas disponible pour cette machine.',
+            notManaged: ({ provider, url }: { provider: string; url: string }) => `Happier ne gère pas la CLI ${provider}. Installez-la vous-même : ${url}`,
             installSubtitle: 'Installe le CLI du provider sur la machine sélectionnée (au mieux).',
             reinstallSubtitle: 'Relance l’installeur du provider même si le CLI est déjà présent.',
             confirmInstallTitle: ({ provider }: { provider: string }) => `Installer ${provider} CLI ?`,

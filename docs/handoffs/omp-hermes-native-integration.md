@@ -210,3 +210,19 @@ Things the live run is most likely to break (assumptions from source only):
 4. Resolve findings 6.1 and 6.6; decide on 6.2.
 5. Run the repo gates before any PR (per `AGENTS.md`): package typechecks (agents, protocol, cli, app, plus docs/website), relevant vitest slices through `./apps/stack/bin/hstack-exec --`, lint if the repo has a lane, Windows/macOS smoke for CLI spawn paths if available, and a `happier-review` pass (`.agents/skills/happier-review`) at the integration boundary. Check whether the 0.2 to 0.3 port skill (`.agents/skills/happier-port-0-2-to-0-3`) applies to this branch's line.
 6. Squash or reword the WIP checkpoint `38b8ef23` (its subject says "WIP checkpoint") before opening a PR; none exists yet. Delete this handoff file before merging.
+
+## 8. Live validation 1 (PR owner, deployed branch)
+
+Setup: from-zero deployment of `4c64063` — relay server + web UI built from this branch's `Dockerfile` (`relay-server-local-source`), Caddy TLS front, fresh server DB, fresh dev box with the branch CLI/daemon (`0.2.21`), no prior Hermes/OMP state.
+
+Passed:
+- `happier setup --relay <url>` → web pairing → `✓ Signed in`, machine registered, daemon connects and keeps alive.
+- Settings → Agents installs via the daemon: claude 2.1.332 (vendor_recipe), opencode 2.4.2 and pi 1.6.1 (managed_package), with complete provider-installs logs.
+- Hermes 0.19.0 installed via `uv tool install hermes-agent` is discovered from `~/.local/bin`; `happier hermes` spawns, the session socket reaches `online`, no wire errors. (0.19.0 is the version the wire frames were reconstructed against.)
+- Not yet exercised live: OMP sessions, approvals, resume, profile picker.
+
+Three findings, all fixed:
+
+1. Agents settings install for Hermes showed "Install failed". Hermes has no install recipe, so the daemon returns `install-not-available` before any provider-installs log exists. The bulk install flow (`ProviderSetupFlow` / `useProviderCliInstallQueue`) ignored that concept. Now providers without any install path (`isProviderCliInstallManaged`, `packages/agents`) are not selectable, show "Happier does not manage the X CLI" with the install guide URL, and the daemon's `install-not-available` refusal maps to the same state. Refused real installs now write a `[capabilities] Provider CLI install refused` daemon log line (`apps/cli/src/rpc/handlers/capabilities.ts`).
+2. Hermes docs lacked an install path. `hermes.mdx` now documents the uv install and states users must run their own gateway.
+3. `happier hermes` without a TTY printed nothing. Root cause was the shared ACP runner (`runStandardAcpProvider`), so pi/omp and the other ACP agents were affected too. A user-started session now prints the logs-only line and session id to stdout. It keeps running (it hosts the session for the app/web), rather than exiting; daemon-started sessions stay silent.

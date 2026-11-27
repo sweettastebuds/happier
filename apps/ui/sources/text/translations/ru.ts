@@ -4077,6 +4077,7 @@ export const ru: TranslationStructure = {
       reinstallTitle: ({ provider }: { provider: string }) =>
         `Переустановить ${provider} CLI`,
       autoInstallUnavailable: "Авто-установка недоступна для этой машины.",
+      notManaged: ({ provider, url }: { provider: string; url: string }) => `Happier не управляет CLI ${provider}. Установите её самостоятельно: ${url}`,
       installSubtitle:
         "Устанавливает CLI провайдера на выбранной машине (best-effort).",
       reinstallSubtitle:
